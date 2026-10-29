@@ -23,43 +23,44 @@ included, so nothing needs downloading.
 All report content is in `report/`, to be read in this order:
 
 1. `report/01-Introduction.ipynb`: the question, the data, exploratory analysis.
-2. `report/02-Preprocessing.ipynb`: removing columns recorded after the booking, cleaning, and the chronological
-   train / validation / test split. Saves `Data/hotel_bookings_clean.csv`.
-3. `report/03-Evaluation.ipynb`: how we test and compare the models: the agreed metric, the scoring of all submissions
-   with the same code, the question of whether the best model is truly best, and checks of how the scores generalise.
-   Until the three real models are submitted it runs on clearly labelled stand-in models.
-4. Model notebooks, one per member (to be added).
+2. `report/02-Preprocessing.ipynb`: removing columns recorded after the booking, cleaning, and the random
+   train / validation / test split (70/15/15, stratified by the target, identical rows kept together). Saves `Data/hotel_bookings_clean.csv`.
+3. `report/04-XGBoost.ipynb`: Thomas's gradient boosting model. The random forest and regression notebooks are still
+   to be added.
 
 ## How we test our models
 
-Every model outputs a probability of cancellation for the same 40,509 test bookings (arrivals 1 January to 31 August 2017,
-`split == "test"`), saved as `<Name>/test_preds.csv` with columns `id,prediction`. Models are fitted on the training rows
-(July 2015 to September 2016) and tuned on the validation rows (October to December 2016); the test rows are never used
+Every model outputs a probability of cancellation for the same 17,903 test bookings
+(`split == "test"`), saved as `<Name>/test_preds.csv` with columns `id,prediction`, where `id` is the 0-based row number
+in `Data/hotel_bookings_clean.csv`. Models are fitted on the training rows
+(83,324) and tuned on the validation rows (17,331); the test rows are never used
 for fitting, tuning or choosing a threshold. The primary metric is the Brier score, reported with a paired 95% interval
 alongside log loss, ROC AUC, calibration, and threshold and cost-based metrics. "Best" requires a significant Brier
 difference, no reversal on the Murphy (expected cost) diagram, and the same order in both hotels.
 
-The full rules and commands are in [`evaluation/README.md`](evaluation/README.md). In short:
+The full rules, including how to create the answer-key file `Data/test_truth.csv` (not yet created), are in section 10 and 11
+of `LukeD/metrics/evaluation_metrics.md`. Once everyone has saved their predictions:
 
 ```bash
-python evaluation/make_test_truth.py          # once: writes Data/test_truth.csv
-python evaluation/evaluate.py --truth Data/test_truth.csv \
+python LukeD/metrics/evaluate.py --truth Data/test_truth.csv \
     --pred RF_Luke=LukeD/test_preds.csv --pred XGB_Thomas=ThomasF/test_preds.csv --pred Logit_Morgan=MorganL/test_preds.csv \
-    --reference-rate 0.360 --group hotel --cluster block --n-boot 2000 --outdir results
+    --reference-rate 0.373 --group hotel --cluster block --n-boot 2000 --outdir results
 ```
 
 ## Evaluation work
 
-* `evaluation/`: the shared scoring tool `evaluate.py`, the answer-key script, and the rules for submissions.
-* `LukeD/metrics/evaluation_metrics.md` (PDF: `LukeD/metrics/tex/evaluation_metrics.pdf`): the research note with the
-  mathematics, simulations and references behind every metric (about 12,000 words; the summary at its start is a
-  two-minute read).
-* `LukeD/metrics/simulations.py`: reproduces every figure and number in the note
-  (`python LukeD/metrics/simulations.py --data Data/hotel_bookings_clean.csv`, about five minutes).
-* `LukeD/metrics/test_evaluate.py`: 13 checks of the scoring tool against scikit-learn and SciPy.
+All in `LukeD/metrics/`:
 
-Code provenance: `evaluation/evaluate.py`, `evaluation/make_test_truth.py`, `report/03-Evaluation.ipynb` and the scripts in
-`LukeD/metrics/` were drafted with the help of Claude (Anthropic) and are tested by `test_evaluate.py`.
+* `evaluation_metrics.md`: the research note with the mathematics, simulations and references behind every metric
+  (the summary at its start is a two-minute read).
+* `evaluate.py`: the shared scoring tool.
+* `simulations.py`: reproduces every figure and number in the note
+  (`python LukeD/metrics/simulations.py --data Data/hotel_bookings_clean.csv`, about five minutes), writing
+  `sim_results.json` and the figures in `figures/`.
+* `test_evaluate.py`: checks of the scoring tool against scikit-learn and SciPy.
+
+Code provenance: the scripts in `LukeD/metrics/` were drafted with the help of Claude (Anthropic) and are tested by
+`test_evaluate.py`.
 
 ## Evidence
 
