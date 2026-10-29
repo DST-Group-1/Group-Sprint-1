@@ -38,13 +38,14 @@ FIG = "figures"
 S1, S2, S3, S4 = ev.SERIES[:4]
 OUT = {}
 
-# Facts about the group's cleaned file (hotel_bookings_clean.csv: 118,558 rows; split column = train / validation / test
-# by arrival date). configure(df) recomputes them from the file that is passed with --data.
+# Facts about the group's cleaned file (hotel_bookings_clean.csv: 118,558 rows; split column = train / validation / test,
+# a random 70/15/15 split stratified by is_canceled that keeps identical rows together). configure(df) recomputes them
+# from the file that is passed with --data.
 DEFAULTS = dict(
-    n_test=40509, pi_train=0.3595, pi_test=0.3883, city_share_test=0.6763,
-    prev_city_test=0.4262, prev_resort_test=0.3091,
-    rate_lo=0.2521, rate_hi=0.4496,                       # range of cancellation rates over split x hotel
-    marks={"deduplicated data": 0.2792, "Resort hotel": 0.2801, "train": 0.3595, "test": 0.3883, "City hotel": 0.4191})
+    n_test=17903, pi_train=0.3731, pi_test=0.3675, city_share_test=0.6769,
+    prev_city_test=0.4146, prev_resort_test=0.2690,
+    rate_lo=0.2690, rate_hi=0.4202,                       # range of cancellation rates over split x hotel
+    marks={"deduplicated data": 0.2792, "Resort hotel": 0.2801, "train": 0.3731, "test": 0.3675, "City hotel": 0.4191})
 CFG = dict(DEFAULTS)
 
 
@@ -224,6 +225,11 @@ def s3_worked_example():
     sign = np.sign(d.values)
     OUT["S3_murphy_B_minus_A_crossings"] = [float(t) for t in d.index[1:][np.diff(sign) != 0]]
     OUT["S3_best_by_brier"] = res.extras["best_by_brier"]
+    # cost ratios at which a model is significantly worse / better than the best-Brier model (95% pointwise bands)
+    OUT["S3_murphy_significant_vs_best"] = {
+        k: {"worse": [float(t) for t in g.theta[g.diff_ci_low > 0]],
+            "better": [float(t) for t in g.theta[g.diff_ci_high < 0]]}
+        for k, g in md.groupby("model") if k != res.extras["best_by_brier"]}
     pg = res.extras["per_group"]
     OUT["S3_per_group"] = {f"{r.group}|{r.model}|{r.metric}": [r.estimate, r.ci_low, r.ci_high, r.prevalence]
                            for r in pg.itertuples()}
@@ -364,8 +370,10 @@ def s5_regression(df):
 # S6  Data diagnostics (no models): leakage, duplicates, memorisation under different splits
 # ------------------------------------------------------------------------------------------
 def s6_data(df):
-    """Diagnostics on the cleaned file. The file already carries the group's chronological split
-    (train / validation / test by arrival date) and has had the leaking columns removed."""
+    """Diagnostics on the cleaned file. The file carries the group's split (random 70/15/15, stratified by
+    is_canceled, identical rows kept together) and has had the leaking columns removed. The chronological split
+    by arrival date (train to 30 Sep 2016 / validation Oct-Dec 2016 / test 2017) is rebuilt from the dates for
+    comparison."""
     df = df.copy()
     df["arrival_date"] = pd.to_datetime(df["arrival_date"])
     y = df.is_canceled
@@ -373,14 +381,19 @@ def s6_data(df):
     date_cols = ["arrival_date", "arrival_date_year", "arrival_date_month", "arrival_date_week_number"]
     feats = [c for c in raw if c not in date_cols + ["is_canceled"]]
     spl = df.split.values
+    chron = np.select([df.arrival_date <= "2016-09-30", df.arrival_date <= "2016-12-31"], ["train", "validation"],
+                      "test")
+
+    def split_stats(labels):
+        return {k: {"n": int(len(g)), "prevalence": float(g.is_canceled.mean()),
+                    "first": str(g.arrival_date.min().date()), "last": str(g.arrival_date.max().date()),
+                    "city_share": float((g.hotel == "City Hotel").mean()),
+                    "prev_city": float(g.loc[g.hotel == "City Hotel", "is_canceled"].mean()),
+                    "prev_resort": float(g.loc[g.hotel == "Resort Hotel", "is_canceled"].mean())}
+                for k, g in df.groupby(labels)}
     res = {"n": int(len(df)), "prevalence": float(y.mean()),
            "prevalence_by_hotel": df.groupby("hotel").is_canceled.mean().round(4).to_dict(),
-           "split": {k: {"n": int(len(g)), "prevalence": float(g.is_canceled.mean()),
-                         "first": str(g.arrival_date.min().date()), "last": str(g.arrival_date.max().date()),
-                         "city_share": float((g.hotel == "City Hotel").mean()),
-                         "prev_city": float(g.loc[g.hotel == "City Hotel", "is_canceled"].mean()),
-                         "prev_resort": float(g.loc[g.hotel == "Resort Hotel", "is_canceled"].mean())}
-                     for k, g in df.groupby("split")},
+           "split": split_stats(spl), "chronological_split": split_stats(chron),
            "nonrefund_cancel_rate": float(df.loc[df.deposit_type == "Non Refund", "is_canceled"].mean()),
            "nonrefund_share": float((df.deposit_type == "Non Refund").mean())}
     dup = df.duplicated(subset=raw)
@@ -401,16 +414,26 @@ def s6_data(df):
     # matches by construction. Blocks of rows identical in ALL columns define the groups for the grouped split.
     key = pd.util.hash_pandas_object(df[feats].astype(str), index=False).values
     block = pd.util.hash_pandas_object(df[raw].astype(str), index=False).values
+    # Booking event: same hotel, arrival date, lead time (hence booking date), stay, channel, agent, country, deposit
+    # and customer type. Most plausibly several rooms of one booking that differ in room type, guests or price, so
+    # they are not identical rows and the file's split does not keep them together.
+    event_cols = ["hotel", "arrival_date", "lead_time", "stays_in_weekend_nights", "stays_in_week_nights",
+                  "market_segment", "distribution_channel", "agent", "country", "deposit_type", "customer_type"]
+    event = pd.util.hash_pandas_object(df[event_cols].astype(str), index=False).values
+    ev_size = pd.Series(event).map(pd.Series(event).value_counts()).values
+    ev_pure = (y.groupby(event).transform("min") == y.groupby(event).transform("max")).values
+    res["event_rows_in_multi_row_events"] = float(np.mean(ev_size > 1))
+    res["event_same_outcome_share"] = float(ev_pure[ev_size > 1].mean())
     rng = np.random.default_rng(2026)
     perm = rng.permutation(len(df))
     cut = int(0.8 * len(df))
 
-    def memoriser(tr, te):
+    def memoriser(tr, te, k=key):
         ytr, yte = y.values[tr], y.values[te]
-        table = pd.Series(ytr).groupby(key[tr]).mean()
+        table = pd.Series(ytr).groupby(k[tr]).mean()
         base = ytr.mean()
-        hit = np.isin(key[te], table.index.values)
-        p = np.where(hit, pd.Series(key[te]).map(table).fillna(base).values, base)
+        hit = np.isin(k[te], table.index.values)
+        p = np.where(hit, pd.Series(k[te]).map(table).fillna(base).values, base)
         ss = ev.SortedScores(p)
         W1, W0 = ss.class_weights(yte.astype(float), np.ones(len(te)))
         b = ev.brier_terms(yte, p).mean()
@@ -422,8 +445,16 @@ def s6_data(df):
     test_groups = set(np.random.default_rng(7).choice(ug, size=int(0.2 * len(ug)), replace=False))
     g = np.array([k in test_groups for k in block])
     out["grouped random (identical rows kept together)"] = memoriser(np.where(~g)[0], np.where(g)[0])
-    out["chronological (train + validation -> test)"] = memoriser(np.where(spl != "test")[0], np.where(spl == "test")[0])
-    out["chronological (train -> validation)"] = memoriser(np.where(spl == "train")[0], np.where(spl == "validation")[0])
+    out["file split (train + validation -> test)"] = memoriser(np.where(spl != "test")[0], np.where(spl == "test")[0])
+    out["file split (train -> validation)"] = memoriser(np.where(spl == "train")[0], np.where(spl == "validation")[0])
+    out["file split, booking-event key (train + validation -> test)"] = memoriser(
+        np.where(spl != "test")[0], np.where(spl == "test")[0], k=event)
+    out["file split, booking-event key (train -> validation)"] = memoriser(
+        np.where(spl == "train")[0], np.where(spl == "validation")[0], k=event)
+    out["chronological (train + validation -> test)"] = memoriser(np.where(chron != "test")[0],
+                                                                  np.where(chron == "test")[0])
+    out["chronological (train -> validation)"] = memoriser(np.where(chron == "train")[0],
+                                                           np.where(chron == "validation")[0])
     res["memoriser"] = out
     # the same memoriser, scored on the de-duplicated test rows only
     te_idx = np.where((spl == "test") & ~dup.values)[0]
