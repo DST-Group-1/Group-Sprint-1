@@ -3,8 +3,6 @@
 **Hotel Booking Demand: predicting whether a booking will be cancelled (`is_canceled`)**
 DST Group 1 (Luke D, Thomas F, Morgan L) · research note by Luke D · October 2026 · revised 29 October 2026 for the group's random split
 
-*Provenance: written by Luke D with AI assistance (Claude, Anthropic). Every derivation marked "verified" is checked numerically in [`test_evaluate.py`](test_evaluate.py), every number and figure is reproduced by [`simulations.py`](simulations.py), and the shared scoring tool is [`evaluate.py`](evaluate.py).*
-
 ## Summary
 
 1. **One task, one frozen test set.** Every model outputs a probability that a booking is cancelled, for exactly the same test bookings. We use the split stored in `hotel_bookings_clean.csv` (the `split` column): a random 70/15/15 split, stratified by `is_canceled`, that keeps identical rows in the same set. We train on 83,324 bookings, tune on 17,331 and test once on 17,903, and each set covers arrivals from 1 July 2015 to 31 August 2017. Keeping identical rows together matters: 28.9% of the rows are exact copies of another row, and a lookup table with no ability to generalise reaches an AUC of 0.81 under a plain random split but 0.49 under ours. A random split cannot test predictions of *future* bookings, and rooms of one group booking that differ in a detail can still fall on both sides of it, so we add a chronological check and a check on unseen booking events ([§7.3](#73-what-the-test-set-must-imitate-leakage-duplicates-and-drift)).
@@ -229,13 +227,19 @@ For any model that does better than chance, $\max_t\,[\mathrm{TPR}(t)-\mathrm{FP
 Thresholding $\hat p$ at $t$ gives counts TP, FP, FN and TN. Write $Q=\pi\,\mathrm{TPR}+(1-\pi)\,\mathrm{FPR}$ for the share of bookings flagged as likely cancellations. The common threshold metrics are:
 
 | Metric | Definition | In terms of $\pi$, TPR and FPR |
-| --- | --- | --- |
+| ---- | ------- | --------- |
 | Accuracy | $(\mathrm{TP}+\mathrm{TN})/n$ | $\pi\,\mathrm{TPR}+(1-\pi)(1-\mathrm{FPR})$ |
 | Balanced accuracy | $(\mathrm{TPR}+\mathrm{TNR})/2$ | $(1+\mathrm{TPR}-\mathrm{FPR})/2$ |
 | Precision (PPV) | $\mathrm{TP}/(\mathrm{TP}+\mathrm{FP})$ | $\pi\,\mathrm{TPR}/Q$ |
 | F1 | $2\mathrm{TP}/(2\mathrm{TP}+\mathrm{FP}+\mathrm{FN})$ | $2\pi\,\mathrm{TPR}/(\pi+Q)$ |
-| MCC | $\dfrac{\mathrm{TP}\cdot\mathrm{TN}-\mathrm{FP}\cdot\mathrm{FN}}{\sqrt{(\mathrm{TP}+\mathrm{FP})(\mathrm{TP}+\mathrm{FN})(\mathrm{TN}+\mathrm{FP})(\mathrm{TN}+\mathrm{FN})}}$ | $\sqrt{\dfrac{\pi(1-\pi)}{Q(1-Q)}}\,(\mathrm{TPR}-\mathrm{FPR})$ |
+| MCC | phi correlation of $y$ and $\hat y$ (formula below) | $\sqrt{\pi(1-\pi)/(Q(1-Q))}\,(\mathrm{TPR}-\mathrm{FPR})$ |
 | Cohen's kappa | $(p_o-p_e)/(1-p_e)$ | $p_o$ = accuracy, $p_e=\pi Q+(1-\pi)(1-Q)$ |
+
+The MCC in terms of the counts is
+
+$$
+\mathrm{MCC}=\frac{\mathrm{TP}\cdot\mathrm{TN}-\mathrm{FP}\cdot\mathrm{FN}}{\sqrt{(\mathrm{TP}+\mathrm{FP})(\mathrm{TP}+\mathrm{FN})(\mathrm{TN}+\mathrm{FP})(\mathrm{TN}+\mathrm{FN})}}.
+$$
 
 Some facts worth knowing:
 
@@ -373,11 +377,11 @@ The cleaned file also lacks `arrival_date_day_of_month` (it carries a single `ar
 | Split | Test rows with a matching training row | Memoriser AUC | Memoriser Brier skill |
 | --- | --- | --- | --- |
 | Plain random 80/20 | 35.6% | 0.813 | 0.400 |
-| Our split (identical rows kept together): train + validation → test | 2.8% | 0.491 | −0.047 |
-| Our split: train → validation | 3.0% | 0.491 | −0.051 |
-| Our split, matching on booking events: train + validation → test | 24.9% | 0.654 | 0.120 |
-| Our split, matching on booking events: train → validation | 21.3% | 0.628 | 0.086 |
-| Chronological, for comparison: train + validation → test | 0.6% | 0.504 | −0.001 |
+| Our split (identical rows kept together): train + validation $\to$ test | 2.8% | 0.491 | −0.047 |
+| Our split: train $\to$ validation | 3.0% | 0.491 | −0.051 |
+| Our split, matching on booking events: train + validation $\to$ test | 24.9% | 0.654 | 0.120 |
+| Our split, matching on booking events: train $\to$ validation | 21.3% | 0.628 | 0.086 |
+| Chronological, for comparison: train + validation $\to$ test | 0.6% | 0.504 | −0.001 |
 
 Under a plain random split, a model with no ability to generalise reaches an AUC of 0.81 and removes 40% of the benchmark's Brier score. Under our split the same memoriser does no better than the base rate, so the exact copies no longer leak. Our split does not, however, keep together rooms of one booking that differ in a detail such as the room type, the number of guests or the price. Call rows a *booking event* when they share the hotel, arrival date, lead time (and so the booking date), length of stay, market segment, distribution channel, agent, country, deposit type and customer type: 47% of rows belong to an event with more than one row, and 88% of those rows are in an event whose rows all have the same outcome. A quarter of the test rows (24.9%) share an event with a training or validation row, and a memoriser that looks up the event instead of the identical row reaches an AUC of 0.65 and removes 12% of the benchmark's Brier score. When a booking is made, the outcomes of the rooms booked with it are not yet known, so this is leakage: much smaller than under a plain random split, but not zero. Random forests and boosted trees can pick out individual events from fine-grained features such as the lead time and the arrival week together, and logistic regression much less so, so our split may still tilt the comparison towards the two tree ensembles. Assigning whole booking events rather than identical rows to one set would remove this by construction. With the file as it is, we can measure it instead, by reporting every metric also on the 13,450 test bookings whose event does not occur in training or validation (`event_seen = 0` in [§11](#11-using-evaluatepy)). Duplicates also remain *inside* the test set. Those rows are not independent, so intervals computed as if every row were a separate booking are too narrow; the cluster bootstrap (`--cluster block` in [§11](#11-using-evaluatepy)) resamples each block of identical rows as one unit.
 
