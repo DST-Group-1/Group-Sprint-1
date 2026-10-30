@@ -15,18 +15,21 @@ Equity split: to be agreed by the group and noted here before submission.
 
 ## Reading order and requirements
 
-**Preparation.** Python 3.10 or later with `numpy`, `pandas`, `scipy`, `scikit-learn`, `matplotlib` and `seaborn`
-(`pip install numpy pandas scipy scikit-learn matplotlib seaborn jupyter`). Run notebooks from the `report/` folder.
-`Data/hotel_bookings.csv` (raw) and `Data/hotel_bookings_clean.csv` (cleaned, with the train/validation/test split) are
-included, so nothing needs downloading.
+**Preparation.** Python 3.12 or later. `pip install -r requirements.txt` installs the pinned versions of everything the
+notebooks and scripts use (`numpy`, `pandas`, `scipy`, `scikit-learn`, `matplotlib`, `seaborn`, `xgboost` and Jupyter).
+Run notebooks from the `report/` folder. `Data/hotel_bookings.csv` (raw) and `Data/hotel_bookings_clean.csv` (cleaned,
+with the train/validation/test split) are included, so nothing needs downloading.
 
 All report content is in `report/`, to be read in this order:
 
 1. `report/01-Introduction.ipynb`: the question, the data, exploratory analysis.
 2. `report/02-Preprocessing.ipynb`: removing columns recorded after the booking, cleaning, and the random
    train / validation / test split (70/15/15, stratified by the target, identical rows kept together). Saves `Data/hotel_bookings_clean.csv`.
-3. `report/04-XGBoost.ipynb`: Thomas's gradient boosting model. The random forest and regression notebooks are still
-   to be added.
+3. `report/04-XGBoost.ipynb`: Thomas's gradient boosting model.
+4. `report/05-Random_forest.ipynb`: Luke's random forest, tuned and recalibrated on the validation set (about 13 minutes
+   to run).
+
+The regression notebook is still to be added.
 
 ## How we test our models
 
@@ -38,29 +41,30 @@ for fitting, tuning or choosing a threshold. The primary metric is the Brier sco
 alongside log loss, ROC AUC, calibration, and threshold and cost-based metrics. "Best" requires a significant Brier
 difference, no reversal on the Murphy (expected cost) diagram, and the same order in both hotels.
 
-The full rules, including how to create the answer-key file `Data/test_truth.csv` (not yet created), are in section 10 and 11
-of `LukeD/metrics/evaluation_metrics.md`. Once everyone has saved their predictions:
+The full rules, including how to create the answer-key file `Data/test_truth.csv` (not yet created), are in sections 10
+and 11 of `LukeD/metrics/evaluation_metrics.md`. Once everyone has saved their predictions, run from the repository's
+top folder:
 
 ```bash
 python LukeD/metrics/evaluate.py --truth Data/test_truth.csv \
     --pred RF_Luke=LukeD/test_preds.csv --pred XGB_Thomas=ThomasF/test_preds.csv --pred Logit_Morgan=MorganL/test_preds.csv \
-    --reference-rate 0.373 --group hotel --cluster block --n-boot 2000 --outdir results
+    --reference-rate 0.373 --group hotel --cluster block --n-boot 2000 --outdir report/eval
 ```
 
 ## Evaluation work
 
 All in `LukeD/metrics/`:
 
-* `evaluation_metrics.md`: the research note with the mathematics, simulations and references behind every metric
-  (the summary at its start is a two-minute read).
+* `evaluation_metrics.md` (also as `evaluation_metrics.pdf`): the research note with the mathematics, simulations and
+  references behind every metric (the summary at its start is a two-minute read).
 * `evaluate.py`: the shared scoring tool.
 * `simulations.py`: reproduces every figure and number in the note
   (`python LukeD/metrics/simulations.py --data Data/hotel_bookings_clean.csv`, about five minutes), writing
   `sim_results.json` and the figures in `figures/`.
-* `test_evaluate.py`: checks of the scoring tool against scikit-learn and SciPy.
+* `test_evaluate.py`: checks of the scoring tool against scikit-learn and SciPy (`python LukeD/metrics/test_evaluate.py`).
 
-Code provenance: the scripts in `LukeD/metrics/` were drafted with the help of Claude (Anthropic) and are tested by
-`test_evaluate.py`.
+Code provenance: the scripts in `LukeD/metrics/` and the random forest notebook (`LukeD/05-Random_forest.ipynb`, copied
+to `report/`) were drafted with the help of Claude (Anthropic); the scripts are tested by `test_evaluate.py`.
 
 ## Evidence
 
