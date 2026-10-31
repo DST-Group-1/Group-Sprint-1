@@ -44,7 +44,7 @@ for fitting, tuning or choosing a threshold. The primary metric is the Brier sco
 alongside log loss, ROC AUC, calibration, and threshold and cost-based metrics. "Best" requires a significant Brier
 difference, no reversal on the Murphy (expected cost) diagram, and the same order in both hotels.
 
-The full rules, including how to create the answer-key file `Data/test_truth.csv` (not yet created), are in sections 10
+The full rules, including how the answer-key file `Data/test_truth.csv` is created, are in sections 10
 and 11 of `LukeD/metrics/evaluation_metrics.md`. Once everyone has saved their predictions, run from the repository's
 top folder:
 
