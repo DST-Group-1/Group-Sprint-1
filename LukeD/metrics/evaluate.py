@@ -13,11 +13,11 @@ Inputs
 
 Example
 -------
-  python evaluate.py --truth test_truth.csv \
+  python LukeD/metrics/evaluate.py --truth Data/test_truth.csv \
       --pred RF_Luke=LukeD/test_preds.csv \
       --pred XGB_Thomas=ThomasF/test_preds.csv \
       --pred Logit_Morgan=MorganL/test_preds.csv \
-      --cost-fp 2 --cost-fn 1 --group hotel --n-boot 2000 --outdir results
+      --reference-rate 0.373 --group hotel --cluster block --n-boot 2000 --outdir report/eval
 
   or, inside a notebook:
       from evaluate import evaluate_binary
