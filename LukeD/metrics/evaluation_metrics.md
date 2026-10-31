@@ -6,7 +6,7 @@ DST Group 1 (Luke D, Thomas F, Morgan L) · research note by Luke D · October 2
 ## Summary
 
 1. **One task, one frozen test set.** Every model outputs a probability that a booking is cancelled, for exactly the same test bookings. We use the split stored in `hotel_bookings_clean.csv` (the `split` column): a random 70/15/15 split, stratified by `is_canceled`, that keeps identical rows in the same set. We train on 83,324 bookings, tune on 17,331 and test once on 17,903, and each set covers arrivals from 1 July 2015 to 31 August 2017. Keeping identical rows together matters: 28.9% of the rows are exact copies of another row, and a lookup table with no ability to generalise reaches an AUC of 0.81 under a plain random split but 0.49 under ours. A random split cannot test predictions of *future* bookings, and rooms of one group booking that differ in a detail can still fall on both sides of it, so we add a chronological check and a check on unseen booking events ([§7.3](#73-what-the-test-set-must-imitate-leakage-duplicates-and-drift)).
-2. **Morgan's "regression model" should be a logistic regression on `is_canceled`**, so that it can enter the same comparison. A regression on another target (for example the average daily rate) can be scored with [§8](#8-if-a-model-predicts-a-number-regression-metrics), but it cannot be compared head-to-head with the two classifiers.
+2. **Morgan's "regression model" should be a logistic regression on `is_canceled`**, so that it can enter the same comparison ([§8](#8-a-regression-model-in-a-classification-comparison)). A regression on another target, such as the average daily rate, could not be compared head-to-head with the two classifiers.
 3. **Primary metric: the Brier score**, also reported as a skill score against the training cancellation rate. It is strictly proper (only the true probabilities minimise it), bounded (one over-confident mistake by a random forest cannot dominate it, unlike log loss), splits exactly into a miscalibration part and a discrimination part, and equals the average decision cost over all cost ratios ([§3](#3-proper-scores-for-probabilities), [§6.1](#61-costs-the-bayes-threshold-and-the-murphy-diagram)).
 4. **Always reported alongside it:** log loss, ROC AUC, the calibration intercept and slope with a reliability diagram, and threshold metrics (MCC, balanced accuracy, F1, expected cost) at a threshold fixed *before* anyone sees the test set.
 5. **"Truly best" needs three things:** a paired 95% interval for the Brier difference that excludes zero after a Holm correction ([§7.1](#71-sampling-error-pairing-and-tests)); no reversal on the Murphy diagram over the range of cost ratios a hotel plausibly faces ([§6.1](#61-costs-the-bayes-threshold-and-the-murphy-diagram)); and the same ordering within each hotel ([§7.3](#73-what-the-test-set-must-imitate-leakage-duplicates-and-drift)). If these fail, we report the models as indistinguishable and explain why.
@@ -21,7 +21,7 @@ DST Group 1 (Luke D, Thomas F, Morgan L) · research note by Luke D · October 2
 5. [Discrimination: does the model rank bookings well?](#5-discrimination-does-the-model-rank-bookings-well)
 6. [Decisions: thresholds, costs, and why F1 is not neutral](#6-decisions-thresholds-costs-and-why-f1-is-not-neutral)
 7. [Is the best model truly best?](#7-is-the-best-model-truly-best)
-8. [If a model predicts a number: regression metrics](#8-if-a-model-predicts-a-number-regression-metrics)
+8. [A regression model in a classification comparison](#8-a-regression-model-in-a-classification-comparison)
 9. [Worked example: three synthetic submissions](#9-worked-example-three-synthetic-submissions)
 10. [Proposed evaluation protocol](#10-proposed-evaluation-protocol)
 11. [Using evaluate.py](#11-using-evaluatepy)
@@ -79,10 +79,6 @@ Two common traps (Figure 1):
 ![Expected score against reported probability for four scoring rules](figures/fig1_propriety.png)
 
 *Figure 1. Expected score of a forecast p for a booking whose true cancellation probability is q = 0.37, the overall cancellation rate. The Brier score and log loss are minimised exactly at p = q; absolute error is minimised by reporting 0; misclassification loss is flat on each side of 0.5. Source: `simulations.py`, S1.*
-
-### 2.3 The same idea for numerical predictions
-
-For a real-valued target, a scoring function $S(x,y)$ is **consistent** for a statistical functional $T$ (mean, median, quantile and so on) if $\mathbb{E}_F\,S(T(F),Y)\le\mathbb{E}_F\,S(x,Y)$ for every point prediction $x$ and every distribution $F$ (Gneiting, 2011). Squared error is consistent for the mean, absolute error for the median and the pinball loss for quantiles; under mild regularity conditions, a scoring function is consistent for the mean if and only if it is a Bregman function (Savage, 1971; Gneiting, 2011). The practical message is the same in both settings: **choosing a metric is choosing what the model is asked to predict.** [Section 8](#8-if-a-model-predicts-a-number-regression-metrics) works this out for regression.
 
 ## 3. Proper scores for probabilities
 
@@ -170,7 +166,7 @@ $$
 z=\frac{\sum_i (y_i-\hat p_i)(1-2\hat p_i)}{\sqrt{\sum_i (1-2\hat p_i)^2\,\hat p_i(1-\hat p_i)}}\;\approx\;\mathcal{N}(0,1)
 $$
 
-under calibration. The Hosmer–Lemeshow (1980) test is more common, but its result depends on how bookings are grouped and, with over 40,000 test bookings, it will flag even trivially small miscalibration as significant. I suggest reporting the intercept, slope and MCB with intervals rather than a single p-value.
+under calibration. The Hosmer–Lemeshow (1980) test is more common, but its result depends on how bookings are grouped and, with nearly 18,000 test bookings, it will flag even trivially small miscalibration as significant. I suggest reporting the intercept, slope and MCB with intervals rather than a single p-value.
 
 **Recalibration.** Platt scaling (Platt, 1999) fits the Cox model on *validation* data and applies it to new predictions; isotonic regression (Zadrozny & Elkan, 2002) is the non-parametric version. Both are monotone, so they leave AUC unchanged and can only reduce MCB. Any recalibration must be fitted on validation data, never on the test set.
 
@@ -372,7 +368,7 @@ Hyperparameter tuning, threshold choice and recalibration must use the training 
 
 The cleaned file also lacks `arrival_date_day_of_month` (it carries a single `arrival_date` instead), `company` (replaced by `has_company`), `days_in_waiting_list`, and 832 rows of the raw file. One column deserves a group decision: `deposit_type` is available at booking time, but 99.4% of "Non Refund" bookings (12.3% of all rows) were cancelled, so every model will get much of its skill from it; I suggest reporting the metrics also on the "No Deposit" bookings alone.
 
-**Duplicates.** The cleaned file still contains 34,213 rows (28.9%) that are exact copies of an earlier row (identical in every column except `split`). They come in 8,571 blocks of 2 to 180 identical rows; 46% of duplicated rows are in the "Groups" market segment and 32% come from offline travel agents and tour operators, so they are most plausibly several rooms booked together (the data contain no booking identifier). 98% of "Non Refund" bookings are duplicated rows. Deduplicating changes the cancellation rate from 37.3% to 27.9%. The shares are similar in our three sets: 29% of training rows, 27% of validation rows and 29% of test rows are copies. Under a plain random split, copies of one booking land on both sides; our split prevents this by assigning each block of identical rows to a single set. To measure how much a split flatters a model, I scored a "memoriser" that knows nothing except a lookup table: for each test booking it returns the cancellation rate of training rows that are identical in every feature except the arrival date (excluded so that a chronological split does not rule out matches by construction), and the overall training rate if there are none. The two "booking event" rows use a coarser lookup key, defined below.
+**Duplicates.** The cleaned file still contains 34,213 rows (28.9%) that are exact copies of an earlier row (identical in every column except `split`). They come in 8,571 blocks of 2 to 180 identical rows; 46% of duplicated rows are in the "Groups" market segment and 32% come from offline travel agents and tour operators, so they are most plausibly several rooms booked together (the data contain no booking identifier). 98% of "Non Refund" bookings have at least one identical copy. Deduplicating changes the cancellation rate from 37.3% to 27.9%. The shares are similar in our three sets: 29% of training rows, 27% of validation rows and 29% of test rows are copies. Under a plain random split, copies of one booking land on both sides; our split prevents this by assigning each block of identical rows to a single set. To measure how much a split flatters a model, I scored a "memoriser" that knows nothing except a lookup table: for each test booking it returns the cancellation rate of training rows that are identical in every feature except the arrival date (excluded so that a chronological split does not rule out matches by construction), and the overall training rate if there are none. The two "booking event" rows use a coarser lookup key, defined below.
 
 | Split | Test rows with a matching training row | Memoriser AUC | Memoriser Brier skill |
 | --- | --- | --- | --- |
@@ -401,62 +397,9 @@ The brief asks how a standard metric might compromise real-world generalisabilit
 | A random split, identical rows kept together | every set has the same mix of seasons, years and hotels; no leakage through identical rows | predictions of future bookings are never tested; rooms of one booking that differ in a detail can still straddle the split | chronological check (fit to 2016, score 2017); metrics on test bookings whose booking event is unseen |
 | Deduplication (if chosen) | one row per decision | changes the population and the cancellation rate (37.3% to 27.9%) | keep duplicates, group them in splits, cluster bootstrap |
 
-## 8. If a model predicts a number: regression metrics
+## 8. A regression model in a classification comparison
 
-If Morgan's model, or a later extension, predicts a continuous target such as the average daily rate (ADR), the logic of §2.3 applies: decide which statistical functional we want, then use a loss that is consistent for it.
-
-### 8.1 Which loss asks for what
-
-**Squared error asks for the mean.** $\mathbb{E}(Y-c)^2=\mathrm{Var}(Y)+(\mathbb{E}Y-c)^2$ is minimised at $c=\mathbb{E}Y$, and conditionally $\mathbb{E}\big[(Y-f(X))^2\big]$ is minimised by $f(x)=\mathbb{E}[Y\mid X=x]$. For a fitted model $\hat f$ trained on a random sample, the expected squared error at $x$ splits into noise, squared bias and variance (Geman, Bienenstock & Doursat, 1992):
-
-$$
-\mathbb{E}\big[(Y-\hat f(x))^2\big]=\sigma^2(x)+\big(\mathbb{E}\hat f(x)-f(x)\big)^2+\mathrm{Var}\,\hat f(x).
-$$
-
-**Absolute error asks for the median.** For a continuous distribution function $F$, $\frac{d}{dc}\,\mathbb{E}\lvert Y-c\rvert=P(Y < c)-P(Y > c)=2F(c)-1$, which is zero at the median.
-
-**The pinball loss asks for a quantile.** With $\rho_\tau(u)=u\,(\tau-\mathbf{1}\lbrace u < 0\rbrace)$ and $u=y-c$, $\frac{d}{dc}\,\mathbb{E}\,\rho_\tau(Y-c)=F(c)-\tau$, so the minimiser is the $\tau$-quantile (Koenker & Bassett, 1978). The Huber loss (Huber, 1964), quadratic within $\pm\delta$ and linear outside, is a robust compromise between mean and median.
-
-**The absolute percentage error asks for something below the median.** $\mathbb{E}\,\lvert Y-c\rvert/Y$ is an absolute error under a distribution reweighted by $1/y$, so its minimiser is the median of the density proportional to $f(y)/y$, the "$(-1)$-median" (Gneiting, 2011). MAPE therefore rewards under-prediction.
-
-Figure 5 applies this to the real ADR distribution (the 117,393 bookings with ADR above zero). The best constant prediction is €103.5 under squared error (the mean), €95.0 under absolute error (the median) and €165.0 under the pinball loss with τ = 0.9, but only €76.0 under MAPE: 20% below the median.
-
-![Loss against constant prediction for four regression losses on the ADR data](figures/fig5_regression_functionals.png)
-
-*Figure 5. Average loss of a constant ADR prediction, relative to its minimum, on the 117,393 bookings with ADR above zero. Each loss is minimised by a different statistic of the same data. Source: `simulations.py`, S5.*
-
-### 8.2 Scale, outliers and R²
-
-- **RMSE or MAE.** $\mathrm{MAE}\le\mathrm{RMSE}\le\sqrt{n}\,\mathrm{MAE}$. RMSE is the likelihood-based choice when errors are roughly Gaussian and MAE when they are roughly Laplace (Hodson, 2022); the long-running debate between Willmott & Matsuura (2005) and Chai & Draxler (2014) is really a debate about which error distribution is plausible.
-- **One booking can move RMSE a lot.** A single error $e$ adds $e^2/n$ to the MSE. The raw Kaggle file has one booking with an ADR of €5,400 (the next highest is €510), and that one row accounts for 9.2% of the variance of ADR across its 119,390 bookings. The cleaned file no longer has it (the maximum is €510, 0.06% of the variance), but it shows what to watch for. Had such a row fallen into a 17,903-row test set and a model predicted about €100 for it, it would add $5300^2/17903\approx1569$ to the MSE: a model with an RMSE of €30 on every other booking would report about €50, while its MAE would rise by only €0.30. ADR also contains 1,165 zeros, so MAPE is undefined on it.
-- **R² on test data.** Use the out-of-sample version $R^2_{\text{OOS}}=1-\sum_i(y_i-\hat y_i)^2\big/\sum_i(y_i-\bar y_{\text{train}})^2$ (Campbell & Thompson, 2008), which can be negative. Because $R^2=1-\mathrm{MSE}/\mathrm{Var}(y)$, it depends on the variance of the particular test set and is not comparable across test sets; several non-equivalent definitions are in use (Kvålseth, 1985).
-- **Forecasts over time.** MASE (Hyndman & Koehler, 2006) scales the MAE by that of a naive forecast, which makes errors comparable across series.
-
-### 8.3 Probabilistic regression
-
-If a model outputs a predictive distribution $F$, for example a mean and a standard deviation, it can be scored with the log score $-\log f(y)$ or with the continuous ranked probability score (Matheson & Winkler, 1976; Gneiting & Raftery, 2007),
-
-$$
-\mathrm{CRPS}(F,y)=\int_{-\infty}^{\infty}\big(F(z)-\mathbf{1}\lbrace y\le z\rbrace\big)^2\,dz=\mathbb{E}_F\lvert X-y\rvert-\tfrac{1}{2}\,\mathbb{E}_F\lvert X-X'\rvert,
-$$
-
-where $X$ and $X'$ are independent draws from $F$. The CRPS reduces to the absolute error for a point forecast. For a Gaussian forecast, with $z=(y-\mu)/\sigma$ (Gneiting et al., 2005),
-
-$$
-\mathrm{CRPS}\big(\mathcal{N}(\mu,\sigma^2),y\big)=\sigma\Big[z\big(2\Phi(z)-1\big)+2\varphi(z)-\tfrac{1}{\sqrt{\pi}}\Big]
-$$
-
-(verified against numerical integration). A central $(1-\alpha)$ prediction interval $[l,u]$ is scored by the interval score (Winkler, 1972; Gneiting & Raftery, 2007),
-
-$$
-\mathrm{IS}_\alpha(l,u;y)=(u-l)+\frac{2}{\alpha}(l-y)\,\mathbf{1}\lbrace y < l\rbrace+\frac{2}{\alpha}(y-u)\,\mathbf{1}\lbrace y > u\rbrace,
-$$
-
-which rewards narrow intervals but charges $2/\alpha$ for every unit by which the outcome falls outside.
-
-### 8.4 A regression model in a classification comparison
-
-Ordinary least squares on the 0/1 label (a linear probability model) minimises $\sum_i(y_i-\hat y_i)^2$, which is exactly $n$ times the in-sample Brier score, so its predictions can be scored with the Brier score directly. They can, however, fall outside $[0,1]$ and must be clipped before log loss or calibration can be computed. Logistic regression avoids the problem and is the regression model that belongs in our comparison.
+Every model in our comparison predicts the probability that a booking is cancelled, so a regression model can enter it only as a regression on the 0/1 label. Ordinary least squares on that label (a linear probability model) minimises $\sum_i(y_i-\hat y_i)^2$, which is exactly $n$ times the in-sample Brier score, so its predictions can be scored with the Brier score directly. They can, however, fall outside $[0,1]$ and must be clipped before log loss or calibration can be computed. Logistic regression avoids the problem and is the regression model that belongs in our comparison.
 
 ## 9. Worked example: three synthetic submissions
 
@@ -535,7 +478,7 @@ A checklist for us to agree, amend and then freeze:
 
 ## 11. Using evaluate.py
 
-Creating the shared truth file once (this only defines the split; it fits no model):
+All commands in this section are run from the repository's top folder. Creating the shared truth file once (this only defines the split; it fits no model):
 
 ```python
 import pandas as pd
@@ -560,7 +503,7 @@ Morgan can do the same from R with `write.csv(data.frame(id = ids_test, predicti
 Scoring all three models:
 
 ```bash
-python evaluate.py --truth Data/test_truth.csv \
+python LukeD/metrics/evaluate.py --truth Data/test_truth.csv \
     --pred RF_Luke=LukeD/test_preds.csv \
     --pred XGB_Thomas=ThomasF/test_preds.csv \
     --pred Logit_Morgan=MorganL/test_preds.csv \
@@ -579,7 +522,7 @@ res.plot("figures/")   # reliability, ROC/PR and Murphy diagrams
 
 Two further runs give the checks of §10. The scoring command with `--group event_seen --outdir report/eval_event` repeats every metric for the test bookings whose booking event was (1) or was not (0) seen in training or validation (§7.3). For the chronological check, the truth-file recipe above with `df.arrival_date >= "2017-01-01"` in place of `df.split == "test"`, and without `event_seen`, writes `Data/test_truth_2017.csv`; each model, refitted on the earlier arrivals, is then scored against it in the same way.
 
-`python test_evaluate.py` runs 13 checks: the implementations against scikit-learn and SciPy (Brier score, log loss, AUC, average precision, accuracy, balanced accuracy, F1, MCC, kappa, precision, recall, isotonic regression, KS distance, logistic recalibration), DeLong's variance against a brute-force computation, bootstrap weights against physically resampled data, the CORP identity, and the two integral representations of §6.1. `python simulations.py --data Data/hotel_bookings_clean.csv` reproduces every figure and number in this note (about five minutes; it reads the test-set size, the cancellation rates and the `split` column from the file).
+`python LukeD/metrics/test_evaluate.py` runs 13 checks: the implementations against scikit-learn and SciPy (Brier score, log loss, AUC, average precision, accuracy, balanced accuracy, F1, MCC, kappa, precision, recall, isotonic regression, KS distance, logistic recalibration), DeLong's variance against a brute-force computation, bootstrap weights against physically resampled data, the CORP identity, and the two integral representations of §6.1. `python LukeD/metrics/simulations.py --data Data/hotel_bookings_clean.csv` reproduces every figure and number in this note (about five minutes; it reads the test-set size, the cancellation rates and the `split` column from the file).
 
 ## 12. Metric cheat sheet
 
@@ -596,15 +539,10 @@ Two further runs give the checks of §10. The scoring command with `--group even
 | F1 | $2\mathrm{TP}/(2\mathrm{TP}+\mathrm{FP}+\mathrm{FN})$ | 1 | finding positives | not a scoring rule | yes | yes | implicit costs depend on the model; ignores TN |
 | MCC | phi correlation of $y$ and $\hat y$ | 1 | all four cells | not a scoring rule | yes | yes | still tied to one threshold |
 | Expected cost | $S_\theta(\hat p,y)$ | 0 | decisions at cost ratio $\theta$ | proper, not strictly | yes | yes | needs the costs |
-| RMSE | $(\hat y-y)^2$ | 0 | the conditional mean | consistent for the mean | n/a | n/a | dominated by outliers |
-| MAE | $\lvert\hat y-y\rvert$ | 0 | the conditional median | consistent for the median | n/a | n/a | ignores the size of rare large errors |
-| MAPE | $\lvert\hat y-y\rvert/\lvert y\rvert$ | 0 | the $(-1)$-median | consistent for the $(-1)$-median | n/a | n/a | rewards under-prediction; undefined at $y=0$ |
-| $R^2_{\text{OOS}}$ | $1-\mathrm{SSE}/\mathrm{SST}_{\text{train}}$ | 1 | the conditional mean | equivalent to MSE on one test set | n/a | n/a | not comparable across test sets |
-| CRPS | $\int\big(F(z)-\mathbf{1}\lbrace y\le z\rbrace\big)^2dz$ | 0 | whole predictive distributions | strictly | n/a | n/a | needs a predictive distribution |
 
 ## References
 
-*Data.* Mostipak, J. (2020). *Hotel booking demand* [Data set]. Kaggle. <https://www.kaggle.com/datasets/jessemostipak/hotel-booking-demand>, which originates from Antonio, de Almeida & Nunes (2019a). The numbers in this note were computed from the group's cleaned version of it, `hotel_bookings_clean.csv` (118,558 rows, 30 columns, with a random `split` column that keeps identical rows together), except where the text says that a figure comes from the raw file (the leakage checks in §7.3 and the ADR outlier in §8.2, which I computed from the identical copy distributed by TidyTuesday: rfordatascience/tidytuesday, 2020-02-11, `hotels.csv`, 119,390 rows and 32 columns).
+*Data.* Mostipak, J. (2020). *Hotel booking demand* [Data set]. Kaggle. <https://www.kaggle.com/datasets/jessemostipak/hotel-booking-demand>, which originates from Antonio, de Almeida & Nunes (2019a). The numbers in this note were computed from the group's cleaned version of it, `hotel_bookings_clean.csv` (118,558 rows, 30 columns, with a random `split` column that keeps identical rows together), except where the text says that a figure comes from the raw file (the leakage checks in §7.3, which I computed from the identical copy distributed by TidyTuesday: rfordatascience/tidytuesday, 2020-02-11, `hotels.csv`, 119,390 rows and 32 columns).
 
 - Antonio, N., de Almeida, A., & Nunes, L. (2017). Predicting hotel booking cancellations to decrease uncertainty and increase revenue. *Tourism & Management Studies*, 13(2), 25–39. <https://doi.org/10.18089/tms.2017.13203>
 - Antonio, N., de Almeida, A., & Nunes, L. (2019a). Hotel booking demand datasets. *Data in Brief*, 22, 41–49. <https://doi.org/10.1016/j.dib.2018.11.126>
@@ -616,9 +554,7 @@ Two further runs give the checks of §10. The scoring command with `--group even
 - Breiman, L., Friedman, J. H., Olshen, R. A., & Stone, C. J. (1984). *Classification and Regression Trees*. Wadsworth.
 - Brier, G. W. (1950). Verification of forecasts expressed in terms of probability. *Monthly Weather Review*, 78(1), 1–3.
 - Brodersen, K. H., Ong, C. S., Stephan, K. E., & Buhmann, J. M. (2010). The balanced accuracy and its posterior distribution. In *Proceedings of the 20th International Conference on Pattern Recognition* (pp. 3121–3124). IEEE.
-- Campbell, J. Y., & Thompson, S. B. (2008). Predicting excess stock returns out of sample: Can anything beat the historical average? *The Review of Financial Studies*, 21(4), 1509–1531.
 - Cawley, G. C., & Talbot, N. L. C. (2010). On over-fitting in model selection and subsequent selection bias in performance evaluation. *Journal of Machine Learning Research*, 11, 2079–2107.
-- Chai, T., & Draxler, R. R. (2014). Root mean square error (RMSE) or mean absolute error (MAE)? Arguments against avoiding RMSE in the literature. *Geoscientific Model Development*, 7(3), 1247–1250.
 - Chen, T., & Guestrin, C. (2016). XGBoost: A scalable tree boosting system. In *Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining* (pp. 785–794).
 - Chicco, D., & Jurman, G. (2020). The advantages of the Matthews correlation coefficient (MCC) over F1 score and accuracy in binary classification evaluation. *BMC Genomics*, 21, 6.
 - Cohen, J. (1960). A coefficient of agreement for nominal scales. *Educational and Psychological Measurement*, 20(1), 37–46.
@@ -636,29 +572,20 @@ Two further runs give the checks of §10. The scoring command with `--group even
 - Fagerland, M. W., Lydersen, S., & Laake, P. (2013). The McNemar test for binary matched-pairs data: Mid-p and asymptotic are better than exact conditional. *BMC Medical Research Methodology*, 13, 91. <https://doi.org/10.1186/1471-2288-13-91>
 - Fawcett, T. (2006). An introduction to ROC analysis. *Pattern Recognition Letters*, 27(8), 861–874.
 - Flach, P., Hernández-Orallo, J., & Ferri, C. (2011). A coherent interpretation of AUC as a measure of aggregated classification performance. In *Proceedings of the 28th International Conference on Machine Learning* (pp. 657–664).
-- Geman, S., Bienenstock, E., & Doursat, R. (1992). Neural networks and the bias/variance dilemma. *Neural Computation*, 4(1), 1–58.
-- Gneiting, T. (2011). Making and evaluating point forecasts. *Journal of the American Statistical Association*, 106(494), 746–762. <https://arxiv.org/abs/0912.0902>
 - Gneiting, T., Balabdaoui, F., & Raftery, A. E. (2007). Probabilistic forecasts, calibration and sharpness. *Journal of the Royal Statistical Society: Series B*, 69(2), 243–268.
 - Gneiting, T., & Raftery, A. E. (2007). Strictly proper scoring rules, prediction, and estimation. *Journal of the American Statistical Association*, 102(477), 359–378.
-- Gneiting, T., Raftery, A. E., Westveld, A. H., & Goldman, T. (2005). Calibrated probabilistic forecasting using ensemble model output statistics and minimum CRPS estimation. *Monthly Weather Review*, 133(5), 1098–1118.
 - Good, I. J. (1952). Rational decisions. *Journal of the Royal Statistical Society: Series B*, 14(1), 107–114.
 - Guo, C., Pleiss, G., Sun, Y., & Weinberger, K. Q. (2017). On calibration of modern neural networks. In *Proceedings of the 34th International Conference on Machine Learning* (PMLR 70, pp. 1321–1330).
 - Hand, D. J. (2009). Measuring classifier performance: A coherent alternative to the area under the ROC curve. *Machine Learning*, 77(1), 103–123.
 - Hand, D., & Christen, P. (2018). A note on using the F-measure for evaluating record linkage algorithms. *Statistics and Computing*, 28(3), 539–547. <https://doi.org/10.1007/s11222-017-9746-6>
 - Hanley, J. A., & McNeil, B. J. (1982). The meaning and use of the area under a receiver operating characteristic (ROC) curve. *Radiology*, 143(1), 29–36.
 - Hernández-Orallo, J., Flach, P., & Ferri, C. (2012). A unified view of performance metrics: Translating threshold choice into expected classification loss. *Journal of Machine Learning Research*, 13, 2813–2869. <https://jmlr.org/papers/v13/hernandez-orallo12a.html>
-- Hodson, T. O. (2022). Root-mean-square error (RMSE) or mean absolute error (MAE): When to use them or not. *Geoscientific Model Development*, 15(14), 5481–5487.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Hosmer, D. W., & Lemeshow, S. (1980). Goodness of fit tests for the multiple logistic regression model. *Communications in Statistics: Theory and Methods*, 9(10), 1043–1069.
-- Huber, P. J. (1964). Robust estimation of a location parameter. *The Annals of Mathematical Statistics*, 35(1), 73–101.
-- Hyndman, R. J., & Koehler, A. B. (2006). Another look at measures of forecast accuracy. *International Journal of Forecasting*, 22(4), 679–688.
 - Kapoor, S., & Narayanan, A. (2023). Leakage and the reproducibility crisis in machine-learning-based science. *Patterns*, 4(9), 100804.
 - Kaufman, S., Rosset, S., Perlich, C., & Stitelman, O. (2012). Leakage in data mining: Formulation, detection, and avoidance. *ACM Transactions on Knowledge Discovery from Data*, 6(4), Article 15.
-- Koenker, R., & Bassett, G. (1978). Regression quantiles. *Econometrica*, 46(1), 33–50.
 - Kumar, A., Liang, P., & Ma, T. (2019). Verified uncertainty calibration. In *Advances in Neural Information Processing Systems 32* (NeurIPS 2019).
-- Kvålseth, T. O. (1985). Cautionary note about R². *The American Statistician*, 39(4), 279–285.
 - Lipton, Z. C., Elkan, C., & Narayanaswamy, B. (2014). Optimal thresholding of classifiers to maximize F1 measure. In *Machine Learning and Knowledge Discovery in Databases: ECML PKDD 2014* (LNCS 8725, pp. 225–239). Springer. <https://doi.org/10.1007/978-3-662-44851-9_15>
-- Matheson, J. E., & Winkler, R. L. (1976). Scoring rules for continuous probability distributions. *Management Science*, 22(10), 1087–1096.
 - Matthews, B. W. (1975). Comparison of the predicted and observed secondary structure of T4 phage lysozyme. *Biochimica et Biophysica Acta: Protein Structure*, 405(2), 442–451.
 - McFadden, D. (1974). Conditional logit analysis of qualitative choice behavior. In P. Zarembka (Ed.), *Frontiers in Econometrics* (pp. 105–142). Academic Press.
 - McNemar, Q. (1947). Note on the sampling error of the difference between correlated proportions or percentages. *Psychometrika*, 12(2), 153–157.
@@ -675,7 +602,6 @@ Two further runs give the checks of §10. The scoring command with `--group even
 - Roberts, D. R., Bahn, V., Ciuti, S., et al. (2017). Cross-validation strategies for data with temporal, spatial, hierarchical, or phylogenetic structure. *Ecography*, 40(8), 913–929.
 - Saerens, M., Latinne, P., & Decaestecker, C. (2002). Adjusting the outputs of a classifier to new a priori probabilities: A simple procedure. *Neural Computation*, 14(1), 21–41.
 - Saito, T., & Rehmsmeier, M. (2015). The precision-recall plot is more informative than the ROC plot when evaluating binary classifiers on imbalanced datasets. *PLoS ONE*, 10(3), e0118432.
-- Savage, L. J. (1971). Elicitation of personal probabilities and expectations. *Journal of the American Statistical Association*, 66(336), 783–801.
 - Schervish, M. J. (1989). A general method for comparing probability assessors. *The Annals of Statistics*, 17(4), 1856–1879.
 - Spiegelhalter, D. J. (1986). Probabilistic prediction in patient management and clinical trials. *Statistics in Medicine*, 5(5), 421–433.
 - Stephenson, D. B., Coelho, C. A. S., & Jolliffe, I. T. (2008). Two extra components in the Brier score decomposition. *Weather and Forecasting*, 23(4), 752–757.
@@ -686,7 +612,5 @@ Two further runs give the checks of §10. The scoring command with `--group even
 - Van Calster, B., Nieboer, D., Vergouwe, Y., De Cock, B., Pencina, M. J., & Steyerberg, E. W. (2016). A calibration hierarchy for risk models was defined: From utopia to empirical data. *Journal of Clinical Epidemiology*, 74, 167–176.
 - van Rijsbergen, C. J. (1979). *Information Retrieval* (2nd ed.). Butterworths.
 - Varma, S., & Simon, R. (2006). Bias in error estimation when using cross-validation for model selection. *BMC Bioinformatics*, 7, 91.
-- Willmott, C. J., & Matsuura, K. (2005). Advantages of the mean absolute error (MAE) over the root mean square error (RMSE) in assessing average model performance. *Climate Research*, 30(1), 79–82.
-- Winkler, R. L. (1972). A decision-theoretic approach to interval estimation. *Journal of the American Statistical Association*, 67(337), 187–191.
 - Youden, W. J. (1950). Index for rating diagnostic tests. *Cancer*, 3(1), 32–35.
 - Zadrozny, B., & Elkan, C. (2002). Transforming classifier scores into accurate multiclass probability estimates. In *Proceedings of the 8th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining* (pp. 694–699).
