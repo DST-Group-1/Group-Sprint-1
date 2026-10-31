@@ -25,9 +25,12 @@ All report content is in `report/`, to be read in this order:
 1. `report/01-Introduction.ipynb`: the question, the data, exploratory analysis.
 2. `report/02-Preprocessing.ipynb`: removing columns recorded after the booking, cleaning, and the random
    train / validation / test split (70/15/15, stratified by the target, identical rows kept together). Saves `Data/hotel_bookings_clean.csv`.
-3. `report/04-XGBoost.ipynb`: Thomas's gradient boosting model.
-4. `report/05-Random_forest.ipynb`: Luke's random forest, tuned and recalibrated on the validation set (about 13 minutes
-   to run).
+3. `report/03-Performance_metrics.md`: the performance metric we agreed on (the Brier score) and why, how standardising
+   the evaluation trades off real-world generalisability, and what "best" means. A short version of the research note in
+   `LukeD/metrics/`; its figures come from `LukeD/metrics/simulations.py`.
+4. `report/04-XGBoost.ipynb`: Thomas's gradient boosting model (about 7 minutes to run). Saves `ThomasF/test_preds.csv`.
+5. `report/05-Random_forest.ipynb`: Luke's random forest, tuned and recalibrated on the validation set (about 13 minutes
+   to run). Saves `LukeD/test_preds.csv`.
 
 The regression notebook is still to be added.
 
