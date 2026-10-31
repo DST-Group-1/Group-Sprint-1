@@ -2,13 +2,12 @@
 """
 simulations.py - reproduces every number and figure in evaluation_metrics.md.
 
-  python simulations.py --data path/to/hotel_bookings_clean.csv   (the group's cleaned file: columns
-                                                               include is_canceled, arrival_date and split;
-                                                               the data-based parts S5, S6 and the sizes and
-                                                               rates used in S2-S4 are taken from it. Without
-                                                               --data, S2-S4 use the cleaned file's values
-                                                               stored in DEFAULTS and S5, S6 are skipped.)
-Outputs: figures/*.png and sim_results.json
+  python LukeD/metrics/simulations.py --data Data/hotel_bookings_clean.csv     (from the repository's top folder)
+
+--data is the group's cleaned file (columns include is_canceled, arrival_date and split): the data-based parts S5, S6
+and the sizes and rates used in S2-S4 are taken from it. Without --data, S2-S4 use the cleaned file's values stored
+in DEFAULTS and S5, S6 are skipped.
+Outputs: figures/*.png and sim_results.json, written next to this script whatever the working directory
 
 Sections
   S1  propriety: expected score as a function of the reported probability
@@ -34,7 +33,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-FIG = "figures"
+HERE = os.path.dirname(os.path.abspath(__file__))   # outputs go next to this script, whatever the working directory
+FIG = os.path.join(HERE, "figures")
 S1, S2, S3, S4 = ev.SERIES[:4]
 OUT = {}
 
@@ -483,7 +483,7 @@ def main():
     if df is not None:
         s5_regression(df)
         s6_data(df)
-    with open("sim_results.json", "w") as fh:
+    with open(os.path.join(HERE, "sim_results.json"), "w") as fh:
         json.dump(OUT, fh, indent=1, default=float)
     print("wrote sim_results.json")
 
