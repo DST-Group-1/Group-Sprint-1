@@ -349,6 +349,8 @@ BINARY_BOOT_METRICS = ["brier", "log_loss", "brier_skill", "roc_auc", "average_p
                        "max_youden_ks", "cal_intercept", "cal_slope", "ece"]
 LOWER_IS_BETTER = {"brier", "log_loss", "ece", "expected_cost", "cost_vs_trivial", "mse", "rmse", "mae",
                    "medae", "mape"}
+COUNT_METRICS = {"n_extreme_probs", "n_confident_misses"}      # whole numbers in the summary tables
+P_VALUE_METRICS = {"spiegelhalter_p"}                           # formatted like the test p-values
 
 
 class _ModelCache:
@@ -444,25 +446,28 @@ class EvalResult:
     def summary(self, metrics=None, digits=4):
         """Wide table 'estimate [ci_low, ci_high]' with one row per metric, one column per model."""
         m = self.metrics if metrics is None else self.metrics[self.metrics.metric.isin(metrics)]
-
-        def fmt(r):
-            if np.isnan(r.ci_low):
-                return f"{r.estimate:.{digits}f}"
-            return f"{r.estimate:.{digits}f} [{r.ci_low:.{digits}f}, {r.ci_high:.{digits}f}]"
-        t = m.assign(cell=m.apply(fmt, axis=1)).pivot(index="metric", columns="model", values="cell")
-        order = [k for k in m.metric.unique()]
-        return t.loc[order]
+        return _wide(m, digits)
 
     def to_markdown(self, path=None, digits=4):
         lines = ["## Model metrics (estimate [95% bootstrap CI])", "",
-                 _df_to_md(self.summary(digits=digits).reset_index()), "",
-                 "## Paired comparisons (difference = model_a - model_b)", "",
-                 _df_to_md(self.pairwise.round(5)), ""]
+                 _df_to_md(self.summary(digits=digits).reset_index()), ""]
+        if len(self.pairwise):
+            lines += ["## Paired comparisons (difference = first model minus second)", ""]
+            for (a, b), d in self.pairwise.groupby(["model_a", "model_b"], sort=False):
+                t = pd.DataFrame({"metric": d.metric,
+                                  "difference [95% CI]": [_fmt_est(*v, digits + 1) for v in
+                                                          zip(d["diff"], d.ci_low, d.ci_high)],
+                                  "test": d.test, "p": d.p_value.map(_fmt_p), "p (Holm)": d.p_holm.map(_fmt_p)})
+                lines += [f"### {a} minus {b}", "", _df_to_md(t, "lrlrr"), ""]
         if "per_group" in self.extras:
-            lines += ["## Per-group metrics", "", _df_to_md(self.extras["per_group"].round(4)), ""]
+            by = self.extras.get("group_name")
+            lines += ["## Per-group metrics" + (f" (by {by})" if by else ""), ""]
+            for g, d in self.extras["per_group"].groupby("group", sort=False):
+                lines += [f"### {g} (n = {d.n.iloc[0]:,}, prevalence {d.prevalence.iloc[0]:.3f})", "",
+                          _df_to_md(_wide(d, digits).reset_index()), ""]
         text = "\n".join(lines)
         if path:
-            with open(path, "w") as fh:
+            with open(path, "w", encoding="utf-8") as fh:
                 fh.write(text)
         return text
 
@@ -593,6 +598,7 @@ def evaluate_binary(y, preds, threshold=None, cost_fp=1.0, cost_fn=1.0, n_boot=2
 
     # ---- per-group metrics
     if groups is not None:
+        extras["group_name"] = getattr(groups, "name", None)     # set when groups is a pandas column
         groups = np.asarray(groups)
         tabs = []
         for gval in pd.unique(groups):
@@ -781,12 +787,42 @@ def _plot_binary(res, outdir, prefix):
     return files
 
 
-def _df_to_md(df):
+def _fmt_p(p):
+    """p-values to three decimals; anything smaller is reported as '<0.001'."""
+    return "nan" if np.isnan(p) else "<0.001" if p < 0.001 else f"{p:.3f}"
+
+
+def _fmt_est(est, lo, hi, digits):
+    if np.isnan(lo):
+        return f"{est:.{digits}f}"
+    return f"{est:.{digits}f} [{lo:.{digits}f}, {hi:.{digits}f}]"
+
+
+def _wide(m, digits):
+    """Long rows (model, metric, estimate, ci_low, ci_high) -> one row per metric, one column per model."""
+    def cell(r):
+        if r.metric in COUNT_METRICS:
+            return f"{r.estimate:.0f}"
+        if r.metric in P_VALUE_METRICS:
+            return _fmt_p(r.estimate)
+        return _fmt_est(r.estimate, r.ci_low, r.ci_high, digits)
+    t = m.assign(cell=[cell(r) for r in m.itertuples()]).pivot(index="metric", columns="model", values="cell")
+    return t.loc[m.metric.unique(), m.model.unique()]
+
+
+def _df_to_md(df, align=None):
+    """Markdown table padded to its column widths, so it also reads as plain text and pandoc sizes PDF columns
+    to their contents. align: 'l' or 'r' per column (default: first column left, the rest right)."""
     cols = [str(c) for c in df.columns]
-    out = ["| " + " | ".join(cols) + " |", "|" + "|".join("---" for _ in cols) + "|"]
-    for _, r in df.iterrows():
-        out.append("| " + " | ".join(str(v) for v in r.values) + " |")
-    return "\n".join(out)
+    rows = [[str(v) for v in r] for r in df.itertuples(index=False)]
+    align = align or "l" + "r" * (len(cols) - 1)
+    w = [max(len(s) for s in [c] + [r[i] for r in rows]) for i, c in enumerate(cols)]
+    w[0] += max(0, 73 - (sum(w) + 3 * len(w) + 1))   # pandoc gives only tables wider than 72 characters the full page width
+
+    def line(cells):
+        return "| " + " | ".join(s.ljust(n) if a == "l" else s.rjust(n) for s, n, a in zip(cells, w, align)) + " |"
+    rule = "|" + "|".join("-" * (n + 2) if a == "l" else "-" * (n + 1) + ":" for n, a in zip(w, align)) + "|"
+    return "\n".join([line(cols), rule] + [line(r) for r in rows])
 
 
 # ----------------------------------------------------------------------------------------
@@ -846,7 +882,7 @@ def main(argv=None):
                               cost_fn=args.cost_fn, n_boot=args.n_boot, seed=args.seed,
                               cluster=None if args.cluster is None else truth[args.cluster].values,
                               reference_rate=args.reference_rate,
-                              groups=None if args.group is None else truth[args.group].values,
+                              groups=None if args.group is None else truth[args.group],
                               hac_lag=args.hac_lag)
         res.extras["murphy"].to_csv(os.path.join(args.outdir, "murphy.csv"), index=False)
         if "per_group" in res.extras:
