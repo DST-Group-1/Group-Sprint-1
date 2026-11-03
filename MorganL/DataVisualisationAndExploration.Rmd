@@ -1,0 +1,263 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+```
+
+
+```{r}
+data <- read_csv("~/Data Science Toolbox/sprint1/hotel_bookings_clean.csv")
+
+train <- subset(data, split == "train")
+validation <- subset(data, split == "validation")
+test <- subset(data, split == "test")
+```
+
+```{r}
+# Check the column names
+names(data)
+
+# Check how the data has been divided
+table(data$split)
+
+# Check cancellation rates in training and validation
+data %>%
+  filter(split != "test") %>%
+  group_by(split) %>%
+  summarise(
+    n = n(),
+    cancellation_rate = mean(is_canceled)
+  )
+```
+
+```{r}
+ggplot(train, aes(
+  x = hotel,
+  fill = factor(is_canceled)
+)) +
+  geom_bar(position = "dodge") +
+  labs(
+    title = "Figure 1: Bookings by hotel and outcome",
+    x = "Hotel",
+    y = "Number of bookings",
+    fill = "Cancelled"
+  ) +
+  scale_fill_discrete(
+    labels = c("No", "Yes")
+  ) +
+  theme_minimal()
+```
+
+```{r}
+train %>%
+  group_by(hotel) %>%
+  summarise(
+    bookings = n(),
+    cancellation_rate = mean(is_canceled)
+  )
+```
+
+```{r}
+train <- train %>%
+  mutate(
+    lead_band = cut(
+      lead_time,
+      breaks = c(-1, 7, 30, 90, 180, 365, Inf),
+      labels = c(
+        "0-7", "8-30", "31-90",
+        "91-180", "181-365", "365+"
+      )
+    )
+  )
+```
+
+```{r}
+lead_summary <- train %>%
+  group_by(lead_band, hotel) %>%
+  summarise(
+    cancellation_rate = mean(is_canceled),
+    .groups = "drop"
+  )
+```
+
+```{r}
+ggplot(
+  lead_summary,
+  aes(
+    x = lead_band,
+    y = cancellation_rate,
+    colour = hotel,
+    group = hotel
+  )
+) +
+  geom_line() +
+  geom_point(size = 2) +
+  labs(
+    title = "Figure 2: Cancellation rate by lead time",
+    x = "Lead time (days)",
+    y = "Cancellation rate",
+    colour = "Hotel"
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal()
+```
+
+```{r}
+plot_cancellation <- function(variable) {
+
+  summary_data <- train %>%
+    group_by(category = .data[[variable]]) %>%
+    summarise(
+      cancellation_rate = mean(is_canceled),
+      n = n(),
+      .groups = "drop"
+    ) %>%
+    filter(n >= 100)
+
+  ggplot(
+    summary_data,
+    aes(
+      x = reorder(category, cancellation_rate),
+      y = cancellation_rate
+    )
+  ) +
+    geom_col() +
+    coord_flip() +
+    labs(
+      title = paste("Cancellation rate by", variable),
+      x = NULL,
+      y = "Cancellation rate"
+    ) +
+    scale_y_continuous(labels = scales::percent) +
+    theme_minimal()
+}
+```
+
+```{r}
+plot_cancellation("deposit_type")
+```
+
+```{r}
+plot_cancellation("market_segment")
+```
+
+```{r}
+plot_cancellation("customer_type")
+```
+
+```{r}
+top_countries <- train %>%
+  count(country, sort = TRUE) %>%
+  slice_head(n = 10) %>%
+  pull(country)
+```
+
+```{r}
+train %>%
+  filter(country %in% top_countries) %>%
+  group_by(country) %>%
+  summarise(
+    cancellation_rate = mean(is_canceled),
+    .groups = "drop"
+  ) %>%
+  ggplot(aes(
+    x = reorder(country, cancellation_rate),
+    y = cancellation_rate
+  )) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Figure 4: Cancellation rates by country",
+    x = "Country",
+    y = "Cancellation rate"
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal()
+```
+
+```{r}
+seasonal_data <- train %>%
+  mutate(
+    month = factor(
+      arrival_date_month,
+      levels = month.name
+    )
+  ) %>%
+  group_by(arrival_date_year, month) %>%
+  summarise(
+    cancellation_rate = mean(is_canceled),
+    .groups = "drop"
+  )
+```
+
+```{r}
+ggplot(
+  seasonal_data,
+  aes(
+    x = month,
+    y = cancellation_rate,
+    colour = factor(arrival_date_year),
+    group = arrival_date_year
+  )
+) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Figure 5: Cancellation rates by month and year",
+    x = "Arrival month",
+    y = "Cancellation rate",
+    colour = "Year"
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+numeric_data <- train %>%
+  select(where(is.numeric)) %>%
+  select(-arrival_date_year)
+
+cor_matrix <- cor(numeric_data)
+```
+
+```{r}
+cor_data <- as.data.frame(as.table(cor_matrix))
+
+names(cor_data) <- c(
+  "Variable1",
+  "Variable2",
+  "Correlation"
+)
+ggplot(cor_data, aes(
+  x = Variable1,
+  y = Variable2,
+  fill = Correlation
+)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    limits = c(-1, 1)
+  ) +
+  labs(
+    title = "Figure 6: Correlation matrix",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 90,
+      hjust = 1
+    )
+  )
+```
