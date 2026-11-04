@@ -854,13 +854,8 @@ knitr::kable(
 )
 ```
 
-The difference is particularly striking for Non Refund bookings: approximately 99.2% were cancelled, compared with 28.6% of No Deposit bookings.
 
-This helps explain why the regression produces some probabilities very close to one. However, this is an unusual feature of the dataset, and we need to be cautious about assuming the same relationship would hold for future bookings.
-
-**Checking the extreme predictions**
-
-We also looked at how many validation predictions were below 0.01 or above 0.99, and whether these very confident predictions were generally correct.
+Checking the extreme predictions; how many validation predictions were below 0.01 or above 0.99 and whether these very confident predictions were generally correct.
 
 ```{r extreme-predictions}
 # Model 5 validation probabilities
@@ -895,13 +890,6 @@ knitr::kable(
 )
 ```
 
-Of the 17,331 validation bookings, 2,146 received predicted probabilities below 1% or above 99%. Only 13 of these were incorrectly classified at the 0.5 threshold.
-
-The Brier score for these extreme predictions was 0.0060, compared with 0.1496 for the remaining bookings. This suggests that most of the very confident predictions were accurate, rather than simply being a sign of a poorly fitted model.
-
-Overall, the numerical checks gave us reasonable confidence to continue developing Model 5. We found no separation in this specification, and the extreme probabilities were generally associated with accurately predicted outcomes.
-
-However, we still need to check how well the final model is calibrated, since being confident and correct on most of these bookings does not guarantee that all predicted probabilities are reliable. 
 
 
 ```{r}
