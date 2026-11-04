@@ -1,0 +1,3227 @@
+---
+title: "sprnt1"
+output: word_document
+date: "2026-10-28"
+---
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(BSDA)
+```
+
+
+```{r}
+data <- read_csv("~/Data Science Toolbox/sprint1/hotel_bookings_clean.csv")
+
+train <- subset(data, split == "train")
+validation <- subset(data, split == "validation")
+test <- subset(data, split == "test")
+```
+
+```{r}
+# Check the column names
+names(data)
+
+# Check how the data has been divided
+table(data$split)
+
+# Check cancellation rates in training and validation
+data %>%
+  filter(split != "test") %>%
+  group_by(split) %>%
+  summarise(
+    n = n(),
+    cancellation_rate = mean(is_canceled)
+  )
+```
+
+```{r}
+model <- glm(
+  is_canceled ~ hotel +
+    lead_time +
+    deposit_type +
+    market_segment +
+    adr +
+    customer_type +
+    total_of_special_requests +
+    previous_cancellations +
+    arrival_date_month +
+    is_repeated_guest,
+  data = train,
+  family = binomial
+)
+
+summary(model)
+```
+
+```{r}
+model <- glm(
+  is_canceled ~ lead_time + hotel,
+  data = train,
+  family = binomial(link = "logit")
+)
+```
+
+```{r}
+model_logit <- glm(
+  formula(model),
+  data = train,
+  family = binomial(link = "logit")
+)
+
+model_probit <- glm(
+  formula(model),
+  data = train,
+  family = binomial(link = "probit")
+)
+
+model_cloglog <- glm(
+  formula(model),
+  data = train,
+  family = binomial(link = "cloglog")
+)
+```
+
+```{r}
+models <- list(
+  Logit = model_logit,
+  Probit = model_probit,
+  Cloglog = model_cloglog
+)
+
+results <- sapply(models, function(m) {
+  p <- predict(m, validation, type = "response")
+  mean((p - validation$is_canceled)^2)
+})
+
+print(results)
+```
+
+```{r}
+# Transform lead_time
+model_log_lead <- update(
+  model_logit,
+  . ~ . - lead_time + log1p(lead_time)
+)
+
+# Predict on validation data
+p_log_lead <- predict(
+  model_log_lead,
+  newdata = validation,
+  type = "response"
+)
+
+# Calculate Brier score
+brier_log_lead <- mean(
+  (p_log_lead - validation$is_canceled)^2
+)
+
+# Compare to original
+c(
+  Original = results["Logit"],
+  Log_lead = brier_log_lead
+)
+```
+
+```{r}
+AIC(model_logit, model_log_lead)
+```
+
+```{r}
+#comparison <- data.frame(
+#  Model = c(
+#    "Logit",
+#    "Probit",
+#    "Cloglog",
+#    "Logit + log(lead_time + 1)",
+#    "Logit + log(lead_time + 1) + month"
+#  ),
+#  Brier = c(
+#    unname(results["Logit"]),
+#    unname(results["Probit"]),
+#    unname(results["Cloglog"]),
+#    brier_log_lead,
+#    brier_month))
+
+#comparison[order(comparison$Brier), ]
+```
+
+```{r}
+model1 <- glm(
+  is_canceled ~ hotel + lead_time,
+  data = train,
+  family = binomial(link = "logit")
+)
+
+summary(model1)
+```
+
+```{r}
+# Columns we don't want to use as predictors
+exclude <- c(
+  "is_canceled",
+  "split",
+  "arrival_date",
+  "arrival_date_year",
+  "total_nights",
+  "total_guests",
+  "has_agent"
+)
+
+# Select all remaining predictors
+predictors <- setdiff(names(train), exclude)
+
+# Construct the full model formula
+full_formula <- reformulate(
+  predictors,
+  response = "is_canceled"
+)
+
+# Fit the full logistic regression
+model_full <- glm(
+  full_formula,
+  data = train,
+  family = binomial(link = "logit")
+)
+
+summary(model_full)
+```
+
+```{r}
+ggplot(train, aes(
+  x = hotel,
+  fill = factor(is_canceled)
+)) +
+  geom_bar(position = "dodge") +
+  labs(
+    title = "Figure 1: Bookings by hotel and outcome",
+    x = "Hotel",
+    y = "Number of bookings",
+    fill = "Cancelled"
+  ) +
+  scale_fill_discrete(
+    labels = c("No", "Yes")
+  ) +
+  theme_minimal()
+```
+
+```{r}
+train %>%
+  group_by(hotel) %>%
+  summarise(
+    bookings = n(),
+    cancellation_rate = mean(is_canceled)
+  )
+```
+
+```{r}
+train <- train %>%
+  mutate(
+    lead_band = cut(
+      lead_time,
+      breaks = c(-1, 7, 30, 90, 180, 365, Inf),
+      labels = c(
+        "0-7", "8-30", "31-90",
+        "91-180", "181-365", "365+"
+      )
+    )
+  )
+```
+
+```{r}
+lead_summary <- train %>%
+  group_by(lead_band, hotel) %>%
+  summarise(
+    cancellation_rate = mean(is_canceled),
+    .groups = "drop"
+  )
+```
+
+```{r}
+lead_summary <- train %>%
+  group_by(lead_band, hotel) %>%
+  summarise(
+    cancellation_rate = mean(is_canceled),
+    .groups = "drop"
+  )
+```
+
+```{r}
+ggplot(
+  lead_summary,
+  aes(
+    x = lead_band,
+    y = cancellation_rate,
+    colour = hotel,
+    group = hotel
+  )
+) +
+  geom_line() +
+  geom_point(size = 2) +
+  labs(
+    title = "Figure 2: Cancellation rate by lead time",
+    x = "Lead time (days)",
+    y = "Cancellation rate",
+    colour = "Hotel"
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal()
+```
+
+```{r}
+plot_cancellation <- function(variable) {
+
+  summary_data <- train %>%
+    group_by(category = .data[[variable]]) %>%
+    summarise(
+      cancellation_rate = mean(is_canceled),
+      n = n(),
+      .groups = "drop"
+    ) %>%
+    filter(n >= 100)
+
+  ggplot(
+    summary_data,
+    aes(
+      x = reorder(category, cancellation_rate),
+      y = cancellation_rate
+    )
+  ) +
+    geom_col() +
+    coord_flip() +
+    labs(
+      title = paste("Cancellation rate by", variable),
+      x = NULL,
+      y = "Cancellation rate"
+    ) +
+    scale_y_continuous(labels = scales::percent) +
+    theme_minimal()
+}
+```
+
+```{r}
+plot_cancellation("deposit_type")
+
+plot_cancellation("market_segment")
+
+plot_cancellation("customer_type")
+```
+
+```{r}
+top_countries <- train %>%
+  count(country, sort = TRUE) %>%
+  slice_head(n = 10) %>%
+  pull(country)
+```
+
+```{r}
+train %>%
+  filter(country %in% top_countries) %>%
+  group_by(country) %>%
+  summarise(
+    cancellation_rate = mean(is_canceled),
+    .groups = "drop"
+  ) %>%
+  ggplot(aes(
+    x = reorder(country, cancellation_rate),
+    y = cancellation_rate
+  )) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Figure 4: Cancellation rates by country",
+    x = "Country",
+    y = "Cancellation rate"
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal()
+```
+
+```{r}
+seasonal_data <- train %>%
+  mutate(
+    month = factor(
+      arrival_date_month,
+      levels = month.name
+    )
+  ) %>%
+  group_by(arrival_date_year, month) %>%
+  summarise(
+    cancellation_rate = mean(is_canceled),
+    .groups = "drop"
+  )
+```
+
+```{r}
+ggplot(
+  seasonal_data,
+  aes(
+    x = month,
+    y = cancellation_rate,
+    colour = factor(arrival_date_year),
+    group = arrival_date_year
+  )
+) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Figure 5: Cancellation rates by month and year",
+    x = "Arrival month",
+    y = "Cancellation rate",
+    colour = "Year"
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+numeric_data <- train %>%
+  select(where(is.numeric)) %>%
+  select(-arrival_date_year)
+
+cor_matrix <- cor(numeric_data)
+```
+
+```{r}
+cor_data <- as.data.frame(as.table(cor_matrix))
+
+names(cor_data) <- c(
+  "Variable1",
+  "Variable2",
+  "Correlation"
+)
+ggplot(cor_data, aes(
+  x = Variable1,
+  y = Variable2,
+  fill = Correlation
+)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    limits = c(-1, 1)
+  ) +
+  labs(
+    title = "Figure 6: Correlation matrix",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 90,
+      hjust = 1
+    )
+  )
+```
+
+```{r}
+model1 <- glm(
+  is_canceled ~ hotel + lead_time,
+  data = train,
+  family = binomial(link = "logit")
+)
+
+summary(model1)
+```
+https://rstudio-pubs-static.s3.amazonaws.com/621651_eb58c4aeb9ea4b70a74615e95bba56f9.html
+```{r}
+#transform lead time
+model2 <- glm(
+  is_canceled ~ hotel + log1p(lead_time),
+  data = train,
+  family = binomial(link = "logit")
+)
+
+summary(model2)
+```
+
+```{r}
+# Predict probabilities on validation data
+p1 <- predict(model1, newdata = validation, type = "response")
+p2 <- predict(model2, newdata = validation, type = "response")
+
+# Calculate Brier scores
+brier1 <- mean((p1 - validation$is_canceled)^2)
+brier2 <- mean((p2 - validation$is_canceled)^2)
+
+# Compare models
+comparison <- data.frame(
+  Model = c("Original lead time", "Log-transformed lead time"),
+  AIC = c(AIC(model1), AIC(model2)),
+  Brier = c(brier1, brier2)
+)
+
+print(comparison)
+```
+transforming lead_time improves our model
+consistent with the non-linear pattern observed in EDA
+```{r}
+model3 <- glm(
+  is_canceled ~ hotel +
+    log1p(lead_time) +
+    deposit_type +
+    market_segment +
+    customer_type +
+    adr +
+    previous_cancellations +
+    is_repeated_guest +
+    total_of_special_requests +
+    arrival_date_month,
+  data = train,
+  family = binomial(link = "logit")
+)
+
+summary(model3)
+```
+
+
+```{r}
+# Model 3 predicted probabilities
+p3 <- predict(
+  model3,
+  newdata = validation,
+  type = "response"
+)
+
+# Check predictions are valid
+stopifnot(
+  !anyNA(p3),
+  all(p3 >= 0 & p3 <= 1)
+)
+
+# Model 3 Brier score
+brier3 <- mean(
+  (p3 - validation$is_canceled)^2
+)
+
+# Compare the three models
+comparison <- data.frame(
+  Model = c("Model 1", "Model 2", "Model 3"),
+  AIC = c(AIC(model1), AIC(model2), AIC(model3)),
+  Brier = c(brier1, brier2, brier3)
+)
+
+print(comparison)
+```
+
+```{r}
+model4 <- update(
+  model3,
+  . ~ . + country
+)
+```
+
+```{r}
+# Check whether the model converged
+model3$converged
+
+# Check the range of predicted probabilities
+range(fitted(model3))
+
+# Examine cancellations by deposit type
+table(train$deposit_type, train$is_canceled)
+
+# Cancellation proportion within each deposit category
+prop.table(
+  table(train$deposit_type, train$is_canceled),
+  margin = 1
+)
+```
+
+```{r}
+# Predictions from Model 4
+p4 <- predict(
+  model4,
+  newdata = validation,
+  type = "response"
+)
+
+# Calculate Brier score
+brier4 <- mean(
+  (p4 - validation$is_canceled)^2
+)
+
+# Compare models
+data.frame(
+  Model = c("Model 3", "Model 4 + country"),
+  AIC = c(AIC(model3), AIC(model4)),
+  Brier = c(brier3, brier4)
+)
+```
+
+```{r}
+anova(model3, model4, test = "Chisq")
+```
+
+```{r}
+# Predictions from Models 3 and 4
+p3 <- predict(model3, validation, type = "response")
+p4 <- predict(model4, validation, type = "response")
+
+# Compare Brier scores separately for each hotel
+validation %>%
+  mutate(
+    error3 = (is_canceled - p3)^2,
+    error4 = (is_canceled - p4)^2
+  ) %>%
+  group_by(hotel) %>%
+  summarise(
+    n = n(),
+    Brier_Model3 = mean(error3),
+    Brier_Model4 = mean(error4),
+    .groups = "drop"
+  )
+```
+
+```{r}
+model5 <- update(
+  model4,
+  . ~ . +
+    previous_bookings_not_canceled +
+    stays_in_week_nights +
+    stays_in_weekend_nights +
+    adults +
+    children +
+    babies +
+    meal +
+    reserved_room_type +
+    distribution_channel +
+    has_company
+)
+
+summary(model5)
+```
+
+
+```{r}
+# Generate predictions
+p5 <- predict(
+  model5,
+  newdata = validation,
+  type = "response"
+)
+
+# Make sure predictions are valid
+stopifnot(
+  length(p5) == nrow(validation),
+  all(is.finite(p5)),
+  all(p5 >= 0 & p5 <= 1)
+)
+
+# Calculate Brier score
+brier5 <- mean(
+  (p5 - validation$is_canceled)^2
+)
+
+# Compare models
+data.frame(
+  Model = c("Model 4", "Model 5"),
+  Parameters = c(model4$rank, model5$rank),
+  AIC = c(AIC(model4), AIC(model5)),
+  Brier = c(brier4, brier5)
+)
+```
+
+```{r}
+model5$converged
+range(fitted(model5))
+```
+
+```{r}
+train_ref <- train
+
+train_ref$country <- relevel(
+  factor(train_ref$country),
+  ref = "PRT"
+)
+
+train_ref$arrival_date_month <- relevel(
+  factor(train_ref$arrival_date_month),
+  ref = "January"
+)
+
+model5_ref <- update(model5, data = train_ref)
+
+summary(model5_ref)
+```
+
+```{r}
+# Predict cancellation probabilities
+p5 <- predict(
+  model5,
+  newdata = validation,
+  type = "response"
+)
+
+# Check all predictions are valid
+stopifnot(all(is.finite(p5)))
+
+# Calculate Brier score
+brier5 <- mean(
+  (p5 - validation$is_canceled)^2
+)
+
+# Compare Models 4 and 5
+comparison <- data.frame(
+  Model = c("Model 4", "Model 5"),
+  Parameters = c(model4$rank, model5$rank),
+  AIC = c(AIC(model4), AIC(model5)),
+  Brier = c(brier4, brier5)
+)
+
+print(comparison)
+```
+
+```{r}
+model5_no_deposit <- update(
+  model5,
+  . ~ . - deposit_type
+)
+
+# Check convergence
+model5_no_deposit$converged
+```
+
+```{r}
+# Training-set fitted probabilities
+p_with <- fitted(model5)
+p_without <- fitted(model5_no_deposit)
+
+# Count extremely confident predictions
+data.frame(
+  Model = c("With deposit", "Without deposit"),
+  Near_Zero = c(
+    sum(p_with < 1e-8),
+    sum(p_without < 1e-8)
+  ),
+  Near_One = c(
+    sum(p_with > 1 - 1e-8),
+    sum(p_without > 1 - 1e-8)
+  )
+)
+```
+
+```{r}
+# Validation predictions without deposit type
+p_no_deposit <- predict(
+  model5_no_deposit,
+  newdata = validation,
+  type = "response"
+)
+
+stopifnot(all(is.finite(p_no_deposit)))
+
+brier_no_deposit <- mean(
+  (p_no_deposit - validation$is_canceled)^2
+)
+
+data.frame(
+  Model = c("With deposit", "Without deposit"),
+  AIC = c(
+    AIC(model5),
+    AIC(model5_no_deposit)
+  ),
+  Brier = c(
+    brier5,
+    brier_no_deposit
+  )
+)
+```
+
+```{r}
+# Generate validation predictions
+p_with <- predict(
+  model5,
+  newdata = validation,
+  type = "response"
+)
+
+p_without <- predict(
+  model5_no_deposit,
+  newdata = validation,
+  type = "response"
+)
+
+# Compare performance within each deposit category
+deposit_comparison <- validation %>%
+  mutate(
+    error_with = (is_canceled - p_with)^2,
+    error_without = (is_canceled - p_without)^2
+  ) %>%
+  group_by(deposit_type) %>%
+  summarise(
+    n = n(),
+    cancellation_rate = mean(is_canceled),
+    Brier_with = mean(error_with),
+    Brier_without = mean(error_without),
+    .groups = "drop"
+  )
+
+print(deposit_comparison)
+```
+
+```{r}
+# Calculate cancellation rate for each deposit type
+deposit_rates <- tapply(
+  train$is_canceled,
+  train$deposit_type,
+  mean
+)
+
+print(deposit_rates)
+
+# Predict on validation data using training rates
+p_deposit_only <- unname(
+  deposit_rates[validation$deposit_type]
+)
+
+# Calculate Brier score
+brier_deposit_only <- mean(
+  (p_deposit_only - validation$is_canceled)^2
+)
+
+# Compare with our full regression
+data.frame(
+  Model = c("Deposit only", "Model 5"),
+  Brier = c(brier_deposit_only, brier5)
+)
+```
+
+As we added more predictors, R started giving the warning `glm.fit: fitted probabilities numerically 0 or 1 occurred`. This suggested that some bookings were being assigned cancellation probabilities extremely close to zero or one.
+
+This isn't necessarily a problem, as some bookings may genuinely be very easy to predict. However, it can also indicate **complete or quasi-complete separation**, where a predictor or combination of predictors almost perfectly distinguishes cancellations from non-cancellations. In these cases, some coefficient estimates may become unstable or approach infinity.
+
+We therefore wanted to check whether our models had converged and investigate why some predictions were so extreme.
+
+**Checking convergence**
+
+```{r convergence-check}
+data.frame(
+  Model = c("Model 3", "Model 4", "Model 5"),
+  Converged = c(
+    model3$converged,
+    model4$converged,
+    model5$converged
+  )
+)
+```
+
+All three models converged successfully. However, convergence alone does not rule out separation, so we investigated this further using Model 5.
+
+**Checking for separation**
+
+```{r separation-check}
+library(detectseparation)
+
+separation_check <- glm(
+  formula(model5),
+  data = train,
+  family = binomial(link = "logit"),
+  method = detectseparation::detect_separation
+)
+
+# Check whether any coefficients have infinite estimates
+any(is.infinite(coef(separation_check)))
+```
+
+The separation check returned `FALSE`, so there was no evidence of complete or quasi-complete separation in Model 5. This suggests that the warning was not caused by infinite maximum likelihood estimates in this specification, although we still needed to investigate the extreme fitted probabilities.
+
+**Investigating deposit type**
+
+Looking back at the model coefficients, `deposit_type` seemed particularly important. We therefore checked how cancellation rates varied between the three deposit categories.
+
+```{r deposit-check}
+deposit_summary <- train %>%
+  group_by(deposit_type) %>%
+  summarise(
+    Bookings = n(),
+    Cancellation_Rate = mean(is_canceled),
+    .groups = "drop"
+  )
+
+knitr::kable(
+  deposit_summary,
+  digits = 4,
+  caption = "Cancellation rates by deposit type in the training data"
+)
+```
+
+The difference is particularly striking for Non Refund bookings: approximately 99.2% were cancelled, compared with 28.6% of No Deposit bookings.
+
+This helps explain why the regression produces some probabilities very close to one. However, this is an unusual feature of the dataset, and we need to be cautious about assuming the same relationship would hold for future bookings.
+
+**Checking the extreme predictions**
+
+We also looked at how many validation predictions were below 0.01 or above 0.99, and whether these very confident predictions were generally correct.
+
+```{r extreme-predictions}
+# Model 5 validation probabilities
+p5 <- predict(
+  model5,
+  newdata = validation,
+  type = "response"
+)
+
+# Identify predictions below 1% or above 99%
+extreme <- p5 < 0.01 | p5 > 0.99
+
+# Summary of extreme predictions
+extreme_results <- data.frame(
+  Extreme_Predictions = sum(extreme),
+  Incorrect_Classifications = sum(
+    (p5[extreme] >= 0.5) !=
+      validation$is_canceled[extreme]
+  ),
+  Brier_Extreme = mean(
+    (p5[extreme] - validation$is_canceled[extreme])^2
+  ),
+  Brier_Other = mean(
+    (p5[!extreme] - validation$is_canceled[!extreme])^2
+  )
+)
+
+knitr::kable(
+  extreme_results,
+  digits = 4,
+  caption = "Performance of Model 5's extreme validation predictions"
+)
+```
+
+Of the 17,331 validation bookings, 2,146 received predicted probabilities below 1% or above 99%. Only 13 of these were incorrectly classified at the 0.5 threshold.
+
+The Brier score for these extreme predictions was 0.0060, compared with 0.1496 for the remaining bookings. This suggests that most of the very confident predictions were accurate, rather than simply being a sign of a poorly fitted model.
+
+Overall, the numerical checks gave us reasonable confidence to continue developing Model 5. We found no separation in this specification, and the extreme probabilities were generally associated with accurately predicted outcomes.
+
+However, we still need to check how well the final model is calibrated, since being confident and correct on most of these bookings does not guarantee that all predicted probabilities are reliable. 
+
+
+```{r}
+#install.packages("detectseparation")
+library(detectseparation)
+
+separation_check <- glm(
+  formula(model5),
+  data = train,
+  family = binomial(link = "logit"),
+  method = detect_separation
+)
+
+print(separation_check)
+```
+
+```{r}
+# Model 5 predictions on validation data
+p5 <- predict(
+  model5,
+  newdata = validation,
+  type = "response"
+)
+
+# Identify very confident predictions
+extreme <- p5 < 0.01 | p5 > 0.99
+
+# Check how many there are
+sum(extreme)
+
+# Check how many are incorrect
+sum(
+  (p5[extreme] >= 0.5) !=
+    validation$is_canceled[extreme]
+)
+
+# Compare Brier score for extreme vs other predictions
+data.frame(
+  Group = c("Extreme", "Other"),
+  N = c(sum(extreme), sum(!extreme)),
+  Brier = c(
+    mean((p5[extreme] -
+            validation$is_canceled[extreme])^2),
+    mean((p5[!extreme] -
+            validation$is_canceled[!extreme])^2)
+  )
+)
+```
+
+
+Ridge
+```{r}
+#install.packages("glmnet")  
+library(glmnet)
+
+# Use exactly the same predictors as Model 5
+x_train <- model.matrix(model5)[, -1, drop = FALSE]
+
+# Apply the same encoding to validation data
+predictor_terms <- delete.response(terms(model5))
+
+validation_frame <- model.frame(
+  predictor_terms,
+  data = validation,
+  xlev = model5$xlevels
+)
+
+x_validation <- model.matrix(
+  predictor_terms,
+  data = validation_frame,
+  contrasts.arg = model5$contrasts
+)[, -1, drop = FALSE]
+
+# Outcome
+y_train <- train$is_canceled
+
+# Check the columns match
+stopifnot(
+  identical(colnames(x_train), colnames(x_validation)),
+  !anyNA(x_train),
+  !anyNA(x_validation)
+)
+
+dim(x_train)
+dim(x_validation)
+```
+
+```{r}
+set.seed(123)
+
+# Save the folds so LASSO can use exactly the same ones
+foldid <- sample(rep(1:5, length.out = nrow(x_train)))
+
+ridge_cv <- cv.glmnet(
+  x = x_train,
+  y = y_train,
+  family = "binomial",
+  alpha = 0,             # Ridge regression
+  foldid = foldid,
+  type.measure = "mse"   # Brier score for binary outcomes
+)
+
+plot(ridge_cv)
+
+# Best penalty strength
+ridge_cv$lambda.min
+```
+
+```{r}
+# Validation probabilities
+p_ridge <- as.numeric(
+  predict(
+    ridge_cv,
+    newx = x_validation,
+    s = "lambda.min",
+    type = "response"
+  )
+)
+
+# Ridge Brier score
+brier_ridge <- mean(
+  (p_ridge - validation$is_canceled)^2
+)
+
+# Comparison
+data.frame(
+  Model = c("Model 5: Logistic", "Ridge"),
+  Brier = c(brier5, brier_ridge)
+)
+```
+
+
+```{r}
+# Fit LASSO using the same cross-validation folds as Ridge
+lasso_cv <- cv.glmnet(
+  x = x_train,
+  y = y_train,
+  family = "binomial",
+  alpha = 1,             # LASSO
+  foldid = foldid,
+  type.measure = "mse"   # Brier score
+)
+
+# Plot cross-validation results
+plot(lasso_cv)
+
+# Optimal penalty
+lasso_cv$lambda.min
+```
+
+evaluate on validation data
+```{r}
+# Predict cancellation probabilities
+p_lasso <- as.numeric(
+  predict(
+    lasso_cv,
+    newx = x_validation,
+    s = "lambda.min",
+    type = "response"
+  )
+)
+
+# Calculate Brier score
+brier_lasso <- mean(
+  (p_lasso - validation$is_canceled)^2
+)
+
+# Compare all three
+comparison <- data.frame(
+  Model = c("Ordinary logistic", "Ridge", "LASSO"),
+  Brier = c(brier5, brier_ridge, brier_lasso)
+)
+
+print(comparison)
+```
+
+```{r}
+# Extract LASSO coefficients
+lasso_coefs <- as.matrix(
+  coef(lasso_cv, s = "lambda.min")
+)
+
+# Count nonzero predictor coefficients
+sum(lasso_coefs[-1, 1] != 0)
+```
+
+```{r}
+# What is the larger penalty?
+lasso_cv$lambda.1se
+
+# Predict using this penalty
+p_lasso_1se <- as.numeric(
+  predict(
+    lasso_cv,
+    newx = x_validation,
+    s = "lambda.1se",
+    type = "response"
+  )
+)
+
+# Validation Brier score
+brier_lasso_1se <- mean(
+  (p_lasso_1se - validation$is_canceled)^2
+)
+
+# Count retained coefficients
+coef_1se <- as.matrix(
+  coef(lasso_cv, s = "lambda.1se")
+)
+
+n_1se <- sum(coef_1se[-1, 1] != 0)
+
+# Compare
+data.frame(
+  Model = c("Ordinary logistic", "LASSO min", "LASSO 1SE"),
+  Coefficients = c(88, 88, n_1se),
+  Brier = c(brier5, brier_lasso, brier_lasso_1se)
+)
+
+# Did lambda.min reach the smallest tested penalty?
+lasso_cv$lambda.min == min(lasso_cv$lambda)
+```
+LASSO hasn't substantially simplified the model
+
+spline time
+```{r}
+model6 <- update(
+  model5,
+  . ~ . - log1p(lead_time) +
+    splines::ns(log1p(lead_time), df = 4)
+)
+
+summary(model6)
+```
+
+```{r}
+# Predict on validation
+p6 <- predict(
+  model6,
+  newdata = validation,
+  type = "response"
+)
+
+stopifnot(all(is.finite(p6)))
+
+# Calculate Brier score
+brier6 <- mean(
+  (p6 - validation$is_canceled)^2
+)
+
+# Compare models
+data.frame(
+  Model = c("Model 5", "Model 6 - Spline"),
+  Parameters = c(model5$rank, model6$rank),
+  AIC = c(AIC(model5), AIC(model6)),
+  Brier = c(brier5, brier6)
+)
+```
+
+```{r}
+anova(model5, model6, test = "Chisq")
+```
+
+```{r}
+library(dplyr)
+
+calibration6 <- validation %>%
+  mutate(
+    predicted = as.numeric(p6),
+    bin = ntile(predicted, 10)
+  ) %>%
+  group_by(bin) %>%
+  summarise(
+    n = n(),
+    mean_predicted = mean(predicted),
+    actual_rate = mean(is_canceled),
+    .groups = "drop"
+  )
+
+print(calibration6)
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(
+  calibration6,
+  aes(x = mean_predicted, y = actual_rate)
+) +
+  geom_point(size = 2.5) +
+  geom_line() +
+  geom_abline(
+    intercept = 0,
+    slope = 1,
+    linetype = "dashed",
+    colour = "red"
+  ) +
+  labs(
+    title = "Calibration of Model 6",
+    x = "Mean predicted cancellation probability",
+    y = "Observed cancellation rate"
+  ) +
+  coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
+  theme_minimal()
+```
+
+```{r}
+# Replace linear ADR with a natural cubic spline
+model7 <- update(
+  model6,
+  . ~ . - adr + splines::ns(adr, df = 4)
+)
+
+# Compare goodness of fit
+anova(model6, model7, test = "Chisq")
+
+# Predict on validation
+p7 <- predict(
+  model7,
+  newdata = validation,
+  type = "response"
+)
+
+# Calculate Brier score
+brier7 <- mean(
+  (p7 - validation$is_canceled)^2
+)
+
+# Compare
+data.frame(
+  Model = c("Model 6", "Model 7: ADR spline"),
+  Parameters = c(model6$rank, model7$rank),
+  AIC = c(AIC(model6), AIC(model7)),
+  Brier = c(brier6, brier7)
+)
+```
+
+```{r}
+summary(train$previous_bookings_not_canceled)
+
+quantile(
+  train$previous_bookings_not_canceled,
+  probs = c(0, 0.5, 0.9, 0.99, 1)
+)
+
+mean(train$previous_bookings_not_canceled == 0)
+```
+
+```{r}
+model8 <- update(
+  model7,
+  . ~ . - previous_bookings_not_canceled +
+    log1p(previous_bookings_not_canceled)
+)
+
+p8 <- predict(
+  model8,
+  newdata = validation,
+  type = "response"
+)
+
+stopifnot(all(is.finite(p8)))
+
+brier8 <- mean(
+  (p8 - validation$is_canceled)^2
+)
+
+data.frame(
+  Model = c("Model 7", "Model 8"),
+  Parameters = c(model7$rank, model8$rank),
+  AIC = c(AIC(model7), AIC(model8)),
+  Brier = c(brier7, brier8)
+)
+```
+
+```{r}
+# Predictions using a 0.5 threshold
+predicted_class <- ifelse(p7 >= 0.5, 1, 0)
+
+# Classification accuracy
+accuracy7 <- mean(
+  predicted_class == validation$is_canceled
+)
+
+# Confusion matrix
+table(
+  Predicted = predicted_class,
+  Actual = validation$is_canceled
+)
+
+# Compare against always predicting no cancellation
+baseline_accuracy <- mean(validation$is_canceled == 0)
+
+data.frame(
+  Model = c("Model 7", "Majority-class baseline"),
+  Accuracy = c(accuracy7, baseline_accuracy)
+)
+```
+main concern is 37% cancellations missed, interaction effects??
+```{r}
+# Model 9: Hotel-specific lead-time relationship
+model9 <- update(
+  model7,
+  . ~ . +
+    hotel:splines::ns(log1p(lead_time), df = 4)
+)
+
+# Compare training fit
+anova(model7, model9, test = "Chisq")
+
+# Predict on validation
+p9 <- predict(
+  model9,
+  newdata = validation,
+  type = "response"
+)
+
+stopifnot(all(is.finite(p9)))
+
+# Calculate validation Brier
+brier9 <- mean(
+  (p9 - validation$is_canceled)^2
+)
+
+# Compare
+data.frame(
+  Model = c("Model 7", "Model 9: Hotel x Lead Time"),
+  Parameters = c(model7$rank, model9$rank),
+  AIC = c(AIC(model7), AIC(model9)),
+  Brier = c(brier7, brier9)
+)
+```
+strong statistical evidence that the relationship between lead time and cancellation differs between the two hotels
+```{r}
+model10 <- update(
+  model7,
+  . ~ . + hotel:splines::ns(adr, df = 4)
+)
+
+# Test whether the interaction improves fit
+anova(model7, model10, test = "Chisq")
+```
+
+```{r}
+# Predict using Model 10
+p10 <- predict(
+  model10,
+  newdata = validation,
+  type = "response"
+)
+
+stopifnot(all(is.finite(p10)))
+
+# Calculate Brier
+brier10 <- mean(
+  (p10 - validation$is_canceled)^2
+)
+
+# Compare
+data.frame(
+  Model = c("Model 7", "Model 9", "Model 10"),
+  Parameters = c(
+    model7$rank,
+    model9$rank,
+    model10$rank
+  ),
+  AIC = c(
+    AIC(model7),
+    AIC(model9),
+    AIC(model10)
+  ),
+  Brier = c(
+    brier7,
+    brier9,
+    brier10
+  )
+)
+```
+room price has a different relationship with cancellation depending on the hotel type
+```{r}
+# Model 10 validation predictions
+p10 <- predict(
+  model10,
+  newdata = validation,
+  type = "response"
+)
+
+# Brier score
+brier10 <- mean(
+  (p10 - validation$is_canceled)^2
+)
+
+# Full comparison
+print(data.frame(
+  Model = c("Model 7", "Model 9", "Model 10"),
+  Parameters = c(model7$rank, model9$rank, model10$rank),
+  AIC = c(AIC(model7), AIC(model9), AIC(model10)),
+  Brier = c(brier7, brier9, brier10)
+))
+```
+
+```{r}
+library(dplyr)
+
+agent_summary <- train %>%
+  group_by(agent) %>%
+  summarise(
+    n = n(),
+    cancellation_rate = mean(is_canceled),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n))
+
+# Number of agent categories
+nrow(agent_summary)
+
+# 15 most common categories
+head(agent_summary, 15)
+
+# Categories present in validation but absent from training
+setdiff(
+  unique(validation$agent),
+  unique(train$agent)
+)
+```
+
+```{r}
+model11 <- update(
+  model10,
+  . ~ . + agent
+)
+
+# Check convergence
+model11$converged
+
+# Check number of parameters
+model11$rank
+
+# Compare training fit
+data.frame(
+  Model = c("Model 10", "Model 11"),
+  Parameters = c(model10$rank, model11$rank),
+  AIC = c(AIC(model10), AIC(model11))
+)
+```
+cv
+```{r}
+set.seed(123)
+
+# Use the original cleaned columns
+original_cols <- setdiff(names(data), "split")
+
+# Give identical records the same group ID
+duplicate_group <- train[, original_cols, drop = FALSE] %>%
+  group_by(across(everything())) %>%
+  group_indices()
+
+# One row per group of identical bookings
+group_info <- data.frame(
+  group_id = duplicate_group,
+  is_canceled = train$is_canceled
+) %>%
+  group_by(group_id) %>%
+  summarise(
+    is_canceled = first(is_canceled),
+    n = n(),
+    .groups = "drop"
+  )
+
+# Assign groups to five folds, stratified by outcome
+group_info <- group_info %>%
+  group_by(is_canceled) %>%
+  mutate(
+    fold = sample(rep(1:5, length.out = n()))
+  ) %>%
+  ungroup()
+
+# Assign every booking to its group's fold
+cv_fold <- group_info$fold[
+  match(duplicate_group, group_info$group_id)
+]
+
+# Check the distribution
+table(cv_fold, train$is_canceled)
+```
+check all categories in each held-out fold also occur in that fold's fitting data
+```{r}
+categorical_vars <- c(
+  "hotel",
+  "deposit_type",
+  "market_segment",
+  "customer_type",
+  "arrival_date_month",
+  "country",
+  "meal",
+  "reserved_room_type",
+  "distribution_channel",
+  "agent"
+)
+
+# Count categories missing from each fold's fitting data
+missing_levels <- sapply(1:5, function(k) {
+
+  sapply(categorical_vars, function(v) {
+
+    fit_levels <- unique(
+      train[[v]][cv_fold != k]
+    )
+
+    held_out_levels <- unique(
+      train[[v]][cv_fold == k]
+    )
+
+    sum(!held_out_levels %in% fit_levels)
+
+  })
+
+})
+
+# Display one row per fold
+print(t(missing_levels))
+```
+checks complete
+```{r}
+# Store the formulas of our four candidate models
+cv_formulas <- list(
+  Model5 = formula(model5),
+  Model7 = formula(model7),
+  Model10 = formula(model10),
+  Model11 = formula(model11)
+)
+
+# Prepare to store out-of-fold predicted probabilities
+cv_predictions <- lapply(
+  cv_formulas,
+  function(f) rep(NA_real_, nrow(train))
+)
+
+# Store individual fold results
+cv_results <- data.frame()
+
+# Five-fold cross-validation
+for (k in 1:5) {
+
+  # Split training data into fitting and held-out folds
+  fold_train <- train[cv_fold != k, ]
+  fold_valid <- train[cv_fold == k, ]
+
+  for (name in names(cv_formulas)) {
+
+    message("Fitting ", name, " - Fold ", k)
+
+    # Fit the model using four folds
+    fit <- glm(
+      formula = cv_formulas[[name]],
+      data = fold_train,
+      family = binomial(link = "logit"),
+      control = glm.control(maxit = 50)
+    )
+
+    # Predict on the held-out fold
+    p <- as.numeric(
+      predict(fit, newdata = fold_valid, type = "response")
+    )
+
+    # Check predictions
+    stopifnot(
+      fit$converged,
+      length(p) == nrow(fold_valid),
+      all(is.finite(p))
+    )
+
+    # Store predictions
+    cv_predictions[[name]][cv_fold == k] <- p
+
+    # Calculate fold Brier score
+    fold_brier <- mean(
+      (p - fold_valid$is_canceled)^2
+    )
+
+    cv_results <- rbind(
+      cv_results,
+      data.frame(
+        Model = name,
+        Fold = k,
+        Brier = fold_brier
+      )
+    )
+  }
+}
+```
+
+```{r}
+# Overall Brier score from pooled held-out predictions
+cv_summary <- data.frame(
+  Model = names(cv_predictions),
+
+  CV_Brier = sapply(
+    cv_predictions,
+    function(p) {
+      mean((p - train$is_canceled)^2)
+    }
+  ),
+
+  Fold_SD = sapply(
+    names(cv_predictions),
+    function(name) {
+      sd(cv_results$Brier[
+        cv_results$Model == name
+      ])
+    }
+  )
+)
+
+cv_summary <- cv_summary[
+  order(cv_summary$CV_Brier),
+]
+
+print(cv_summary)
+```
+
+```{r}
+# Predict cancellation probabilities
+p11 <- predict(
+  model11,
+  newdata = validation,
+  type = "response"
+)
+
+# Check predictions
+stopifnot(
+  length(p11) == nrow(validation),
+  all(is.finite(p11))
+)
+
+# Calculate validation Brier
+brier11 <- mean(
+  (p11 - validation$is_canceled)^2
+)
+
+# Compare strongest models
+comparison <- data.frame(
+  Model = c("Model 7", "Model 10", "Model 11"),
+  Parameters = c(
+    model7$rank,
+    model10$rank,
+    model11$rank
+  ),
+  AIC = c(
+    AIC(model7),
+    AIC(model10),
+    AIC(model11)
+  ),
+  Validation_Brier = c(
+    brier7,
+    brier10,
+    brier11
+  )
+)
+
+print(comparison)
+```
+
+
+```{r}
+# Number of special requests
+table(train$total_of_special_requests)
+
+# Number of previous cancellations
+table(train$previous_cancellations)
+```
+
+
+
+```{r}
+train$requests_group <- factor(
+  pmin(train$total_of_special_requests, 3),
+  levels = 0:3,
+  labels = c("0", "1", "2", "3+")
+)
+
+train$prev_cancel_group <- factor(
+  pmin(train$previous_cancellations, 2),
+  levels = 0:2,
+  labels = c("0", "1", "2+")
+)
+
+table(train$requests_group)
+table(train$prev_cancel_group)
+```
+
+```{r}
+formula12 <- update(
+  formula(model11),
+  . ~ . - total_of_special_requests + requests_group
+)
+
+formula13 <- update(
+  formula(model11),
+  . ~ . - previous_cancellations + prev_cancel_group
+)
+```
+
+```{r}
+cv_brier <- function(fml) {
+
+  predictions <- rep(NA_real_, nrow(train))
+  fold_scores <- numeric(5)
+
+  for (k in 1:5) {
+
+    fit <- glm(
+      fml,
+      data = train[cv_fold != k, , drop = FALSE],
+      family = binomial(link = "logit"),
+      control = glm.control(maxit = 50)
+    )
+
+    if (!fit$converged) {
+      stop(paste("Model did not converge in fold", k))
+    }
+
+    p <- as.numeric(predict(
+      fit,
+      newdata = train[cv_fold == k, , drop = FALSE],
+      type = "response"
+    ))
+
+    stopifnot(all(is.finite(p)))
+
+    predictions[cv_fold == k] <- p
+
+    fold_scores[k] <- mean(
+      (p - train$is_canceled[cv_fold == k])^2
+    )
+  }
+
+  c(
+    CV_Brier = mean(
+      (predictions - train$is_canceled)^2
+    ),
+    Fold_SD = sd(fold_scores)
+  )
+}
+
+# Reuse Model 11's previous CV results
+original <- c(
+  CV_Brier = cv_summary$CV_Brier[
+    cv_summary$Model == "Model11"
+  ],
+  Fold_SD = cv_summary$Fold_SD[
+    cv_summary$Model == "Model11"
+  ]
+)
+
+# Compare
+comparison <- rbind(
+  Model11 = original,
+  Model12 = cv_brier(formula12),
+  Model13 = cv_brier(formula13)
+)
+
+print(comparison)
+```
+
+```{r}
+# Model 14: combine both categorical transformations
+formula14 <- update(
+  formula(model11),
+  . ~ . -
+    total_of_special_requests -
+    previous_cancellations +
+    requests_group +
+    prev_cancel_group
+)
+
+# Five-fold cross-validation using the same folds
+cv14 <- cv_brier(formula14)
+
+# Compare with previous results
+rbind(
+  comparison,
+  Model14 = cv14
+)
+```
+
+```{r}
+validation$requests_group <- factor(
+  pmin(validation$total_of_special_requests, 3),
+  levels = 0:3,
+  labels = c("0", "1", "2", "3+")
+)
+
+validation$prev_cancel_group <- factor(
+  pmin(validation$previous_cancellations, 2),
+  levels = 0:2,
+  labels = c("0", "1", "2+")
+)
+```
+
+```{r}
+# Fit Model 14 on the complete training set
+model14 <- glm(
+  formula14,
+  data = train,
+  family = binomial(link = "logit"),
+  control = glm.control(maxit = 50)
+)
+
+# Predict on validation
+p14 <- predict(
+  model14,
+  newdata = validation,
+  type = "response"
+)
+
+p11 <- predict(
+  model11,
+  newdata = validation,
+  type = "response"
+)
+
+stopifnot(
+  model14$converged,
+  all(is.finite(p14)),
+  all(is.finite(p11))
+)
+
+# Compare validation Brier scores
+brier11 <- mean((p11 - validation$is_canceled)^2)
+brier14 <- mean((p14 - validation$is_canceled)^2)
+
+data.frame(
+  Model = c("Model 11", "Model 14"),
+  Parameters = c(model11$rank, model14$rank),
+  AIC = c(AIC(model11), AIC(model14)),
+  Validation_Brier = c(brier11, brier14)
+)
+```
+
+log loss penalises incorrect prediction with high confidence much more severly than brier score
+```{r}
+# Log-loss
+log_loss <- function(y, p) {
+
+  # Avoid log(0)
+  p <- pmin(pmax(p, 1e-15), 1 - 1e-15)
+
+  -mean(
+    y * log(p) +
+    (1 - y) * log(1 - p)
+  )
+}
+
+# ROC-AUC using ranks
+roc_auc <- function(y, p) {
+
+  n1 <- sum(y == 1)
+  n0 <- sum(y == 0)
+
+  ranks <- rank(p, ties.method = "average")
+
+  (sum(ranks[y == 1]) - n1 * (n1 + 1) / 2) /
+    (n1 * n0)
+}
+
+# Compare the models
+metric_comparison <- data.frame(
+  Model = c("Model 11", "Model 14"),
+
+  Brier = c(
+    mean((p11 - validation$is_canceled)^2),
+    mean((p14 - validation$is_canceled)^2)
+  ),
+
+  LogLoss = c(
+    log_loss(validation$is_canceled, p11),
+    log_loss(validation$is_canceled, p14)
+  ),
+
+  ROC_AUC = c(
+    roc_auc(validation$is_canceled, p11),
+    roc_auc(validation$is_canceled, p14)
+  )
+)
+
+print(metric_comparison)
+```
+
+```{r}
+calibration_stats <- function(y, p) {
+
+  # Avoid infinite logits
+  p <- pmin(pmax(p, 1e-10), 1 - 1e-10)
+
+  logit_p <- qlogis(p)
+
+  # Estimate calibration intercept and slope
+  fit <- glm(
+    y ~ logit_p,
+    family = binomial(link = "logit")
+  )
+
+  c(
+    Intercept = unname(coef(fit)[1]),
+    Slope = unname(coef(fit)[2])
+  )
+}
+
+rbind(
+  Model11 = calibration_stats(validation$is_canceled, p11),
+  Model14 = calibration_stats(validation$is_canceled, p14)
+)
+```
+
+```{r}
+# Combine predictions from both models
+calibration_data <- bind_rows(
+  data.frame(
+    Model = "Model 11",
+    predicted = as.numeric(p11),
+    actual = validation$is_canceled
+  ),
+  data.frame(
+    Model = "Model 14",
+    predicted = as.numeric(p14),
+    actual = validation$is_canceled
+  )
+)
+
+# Divide each model's predictions into deciles
+calibration_summary <- calibration_data %>%
+  group_by(Model) %>%
+  mutate(decile = ntile(predicted, 10)) %>%
+  group_by(Model, decile) %>%
+  summarise(
+    mean_predicted = mean(predicted),
+    observed_rate = mean(actual),
+    n = n(),
+    .groups = "drop"
+  )
+
+print(calibration_summary)
+
+# Plot
+ggplot(
+  calibration_summary,
+  aes(
+    x = mean_predicted,
+    y = observed_rate,
+    colour = Model
+  )
+) +
+  geom_abline(
+    intercept = 0,
+    slope = 1,
+    linetype = "dashed",
+    colour = "grey50"
+  ) +
+  geom_line() +
+  geom_point(size = 2) +
+  coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(
+    title = "Calibration of logistic regression models",
+    x = "Mean predicted cancellation probability",
+    y = "Observed cancellation rate",
+    colour = "Model"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+data.frame(
+  Model = c("Model 11", "Model 14"),
+  Mean_Predicted = c(mean(p11), mean(p14)),
+  Observed_Rate = mean(validation$is_canceled)
+)
+```
+
+```{r}
+library(dplyr)
+
+deposit_results <- bind_rows(
+  validation %>%
+    transmute(
+      Model = "Model 11",
+      deposit_type,
+      actual = is_canceled,
+      predicted = as.numeric(p11)
+    ),
+  validation %>%
+    transmute(
+      Model = "Model 14",
+      deposit_type,
+      actual = is_canceled,
+      predicted = as.numeric(p14)
+    )
+) %>%
+  group_by(Model, deposit_type) %>%
+  summarise(
+    n = n(),
+    observed_rate = mean(actual),
+    mean_predicted = mean(predicted),
+    Brier = mean((predicted - actual)^2),
+    .groups = "drop"
+  ) %>%
+  arrange(deposit_type, Model)
+
+print(deposit_results)
+```
+
+```{r}
+hotel_results <- bind_rows(
+  validation %>%
+    transmute(
+      Model = "Model 11",
+      hotel,
+      actual = is_canceled,
+      predicted = as.numeric(p11)
+    ),
+  validation %>%
+    transmute(
+      Model = "Model 14",
+      hotel,
+      actual = is_canceled,
+      predicted = as.numeric(p14)
+    )
+) %>%
+  group_by(Model, hotel) %>%
+  summarise(
+    n = n(),
+    observed_rate = mean(actual),
+    mean_predicted = mean(predicted),
+    Brier = mean((predicted - actual)^2),
+    .groups = "drop"
+  ) %>%
+  arrange(hotel, Model)
+
+print(hotel_results)
+```
+
+```{r}
+# Squared prediction errors for each model
+error11 <- (as.numeric(p11) - validation$is_canceled)^2
+error14 <- (as.numeric(p14) - validation$is_canceled)^2
+
+# Positive values mean Model 14 performs better
+difference <- error11 - error14
+
+# Identify identical booking records
+original_cols <- setdiff(names(data), "split")
+
+val_group <- validation[, original_cols, drop = FALSE] %>%
+  group_by(across(everything())) %>%
+  group_indices()
+
+# Aggregate errors within duplicate groups
+group_errors <- data.frame(
+  group = val_group,
+  difference = difference
+) %>%
+  group_by(group) %>%
+  summarise(
+    n = n(),
+    total_difference = sum(difference),
+    .groups = "drop"
+  )
+
+# Paired bootstrap
+set.seed(456)
+
+B <- 2000
+
+boot_differences <- replicate(B, {
+
+  sampled <- sample.int(
+    nrow(group_errors),
+    size = nrow(group_errors),
+    replace = TRUE
+  )
+
+  sum(group_errors$total_difference[sampled]) /
+    sum(group_errors$n[sampled])
+})
+
+# Original difference and 95% percentile interval
+c(
+  Difference = mean(difference),
+  Lower_95 = unname(quantile(boot_differences, 0.025)),
+  Upper_95 = unname(quantile(boot_differences, 0.975))
+)
+```
+
+```{r}
+# Cross-validation function for a chosen link function
+
+cv_link <- function(link_name) {
+
+  predictions <- rep(NA_real_, nrow(train))
+  fold_scores <- numeric(5)
+
+  for (k in 1:5) {
+
+    message("Link: ", link_name, " | Fold: ", k)
+
+    # Fit on four folds
+    fit <- glm(
+      formula14,
+      data = train[cv_fold != k, , drop = FALSE],
+      family = binomial(link = link_name),
+      control = glm.control(maxit = 50)
+    )
+
+    if (!fit$converged) {
+      stop(paste(link_name, "did not converge in fold", k))
+    }
+
+    # Predict on the held-out fold
+    p <- as.numeric(predict(
+      fit,
+      newdata = train[cv_fold == k, , drop = FALSE],
+      type = "response"
+    ))
+
+    stopifnot(all(is.finite(p)))
+
+    predictions[cv_fold == k] <- p
+
+    fold_scores[k] <- mean(
+      (p - train$is_canceled[cv_fold == k])^2
+    )
+  }
+
+  c(
+    CV_Brier = mean(
+      (predictions - train$is_canceled)^2
+    ),
+    Fold_SD = sd(fold_scores)
+  )
+}
+
+# Compare with the existing logit result
+link_comparison <- rbind(
+  Logit = cv14,
+  Probit = cv_link("probit"),
+  Cloglog = cv_link("cloglog")
+)
+
+print(link_comparison)
+```
+
+```{r}
+average_precision <- function(y, p) {
+
+  # Sort bookings from highest to lowest predicted risk
+  ord <- order(p, decreasing = TRUE)
+  y <- y[ord]
+  p <- p[ord]
+
+  # Treat tied predicted probabilities together
+  ends <- cumsum(rle(p)$lengths)
+
+  # Cumulative true positives
+  tp <- cumsum(y)[ends]
+
+  # Precision and recall at each distinct threshold
+  precision <- tp / ends
+  recall <- tp / sum(y)
+
+  # Average precision
+  sum(
+    c(recall[1], diff(recall)) * precision
+  )
+}
+
+data.frame(
+  Model = c("Model 11", "Model 14", "Prevalence baseline"),
+  Average_Precision = c(
+    average_precision(validation$is_canceled, p11),
+    average_precision(validation$is_canceled, p14),
+    mean(validation$is_canceled)
+  )
+)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+pr_curve <- function(y, p) {
+
+  ord <- order(p, decreasing = TRUE)
+  y <- y[ord]
+  p <- p[ord]
+
+  # Handle tied probabilities together
+  ends <- cumsum(rle(p)$lengths)
+
+  tp <- cumsum(y)[ends]
+
+  data.frame(
+    Recall = c(0, tp / sum(y)),
+    Precision = c(1, tp / ends)
+  )
+}
+
+pr_data <- bind_rows(
+  pr_curve(validation$is_canceled, p11) %>%
+    mutate(Model = "Model 11"),
+
+  pr_curve(validation$is_canceled, p14) %>%
+    mutate(Model = "Model 14")
+)
+
+ggplot(
+  pr_data,
+  aes(x = Recall, y = Precision, colour = Model)
+) +
+  geom_step(direction = "vh") +
+  geom_hline(
+    yintercept = mean(validation$is_canceled),
+    linetype = "dashed",
+    colour = "grey50"
+  ) +
+  coord_cartesian(
+    xlim = c(0, 1),
+    ylim = c(0, 1)
+  ) +
+  labs(
+    title = "Precision–Recall Curves",
+    subtitle = "Validation data",
+    x = "Recall",
+    y = "Precision",
+    colour = "Model"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Evaluate Model 14 at different thresholds
+thresholds <- c(0.3, 0.5, 0.7)
+
+threshold_results <- do.call(rbind, lapply(thresholds, function(t) {
+
+  predicted_class <- as.integer(p14 >= t)
+  actual <- validation$is_canceled
+
+  TP <- sum(predicted_class == 1 & actual == 1)
+  FP <- sum(predicted_class == 1 & actual == 0)
+  FN <- sum(predicted_class == 0 & actual == 1)
+  TN <- sum(predicted_class == 0 & actual == 0)
+
+  data.frame(
+    Threshold = t,
+    Flagged = TP + FP,
+    Precision = TP / (TP + FP),
+    Recall = TP / (TP + FN),
+    Specificity = TN / (TN + FP),
+    Accuracy = (TP + TN) / length(actual),
+    False_Positives = FP,
+    Missed_Cancellations = FN
+  )
+}))
+
+print(threshold_results)
+```
+
+```{r}
+# Select No Deposit bookings
+idx <- validation$deposit_type == "No Deposit"
+
+y_no_deposit <- validation$is_canceled[idx]
+
+# Compare the two logistic models on this subgroup
+data.frame(
+  Model = c("Model 11", "Model 14", "Prevalence baseline"),
+
+  Average_Precision = c(
+    average_precision(y_no_deposit, p11[idx]),
+    average_precision(y_no_deposit, p14[idx]),
+    mean(y_no_deposit)
+  ),
+
+  ROC_AUC = c(
+    roc_auc(y_no_deposit, p11[idx]),
+    roc_auc(y_no_deposit, p14[idx]),
+    0.5
+  )
+)
+```
+
+
+```{r}
+# Remove deposit_type from Model 14
+formula14_no_deposit <- update(
+  formula14,
+  . ~ . - deposit_type
+)
+
+# Cross-validate on training data
+cv14_no_deposit <- cv_brier(formula14_no_deposit)
+
+# Compare with original Model 14
+rbind(
+  Model14 = cv14,
+  Model14_NoDeposit = cv14_no_deposit
+)
+```
+
+```{r}
+# Fit Model 14 without deposit_type
+model14_no_deposit <- glm(
+  formula14_no_deposit,
+  data = train,
+  family = binomial(link = "logit"),
+  control = glm.control(maxit = 50)
+)
+
+# Predict on validation
+p14_no_deposit <- predict(
+  model14_no_deposit,
+  newdata = validation,
+  type = "response"
+)
+
+stopifnot(
+  model14_no_deposit$converged,
+  all(is.finite(p14_no_deposit))
+)
+
+# Compare performance on all validation bookings
+data.frame(
+  Model = c("Model 14", "Without deposit_type"),
+
+  Brier = c(
+    mean((p14 - validation$is_canceled)^2),
+    mean((p14_no_deposit - validation$is_canceled)^2)
+  ),
+
+  LogLoss = c(
+    log_loss(validation$is_canceled, p14),
+    log_loss(validation$is_canceled, p14_no_deposit)
+  ),
+
+  ROC_AUC = c(
+    roc_auc(validation$is_canceled, p14),
+    roc_auc(validation$is_canceled, p14_no_deposit)
+  )
+)
+```
+
+```{r}
+# Compare predictions specifically on No Deposit bookings
+idx <- validation$deposit_type == "No Deposit"
+
+data.frame(
+  Model = c("Model 14", "Without deposit_type"),
+
+  NoDeposit_Brier = c(
+    mean((p14[idx] - validation$is_canceled[idx])^2),
+    mean((p14_no_deposit[idx] -
+            validation$is_canceled[idx])^2)
+  )
+)
+```
+
+```{r}
+deposit_sensitivity <- validation %>%
+  mutate(
+    p_full = as.numeric(p14),
+    p_reduced = as.numeric(p14_no_deposit)
+  ) %>%
+  group_by(deposit_type) %>%
+  summarise(
+    n = n(),
+
+    Observed_Rate = mean(is_canceled),
+
+    Brier_Full = mean((p_full - is_canceled)^2),
+
+    Brier_Reduced = mean((p_reduced - is_canceled)^2),
+
+    Difference = Brier_Reduced - Brier_Full,
+
+    .groups = "drop"
+  )
+
+print(deposit_sensitivity)
+```
+
+```{r}
+daily_forecast <- validation %>%
+  mutate(
+    predicted = as.numeric(p14),
+    arrival_date = as.Date(arrival_date)
+  ) %>%
+  group_by(hotel, arrival_date) %>%
+  summarise(
+    bookings = n(),
+    expected = sum(predicted),
+    observed = sum(is_canceled),
+    error = expected - observed,
+    .groups = "drop"
+  )
+
+head(daily_forecast, 10)
+```
+
+```{r}
+daily_summary <- daily_forecast %>%
+  group_by(hotel) %>%
+  summarise(
+    Days = n(),
+    Total_Bookings = sum(bookings),
+    Expected = sum(expected),
+    Observed = sum(observed),
+    Bias_Per_Day = mean(error),
+    MAE_Per_Day = mean(abs(error)),
+    RMSE_Per_Day = sqrt(mean(error^2)),
+    .groups = "drop"
+  )
+
+print(daily_summary)
+```
+
+```{r}
+ggplot(daily_forecast,
+       aes(x = expected, y = observed)) +
+  geom_point(alpha = 0.3) +
+  geom_abline(
+    intercept = 0,
+    slope = 1,
+    linetype = "dashed",
+    colour = "red"
+  ) +
+  facet_wrap(~hotel, scales = "free") +
+  labs(
+    title = "Expected vs Observed Daily Cancellations",
+    subtitle = "Validation bookings grouped by arrival date",
+    x = "Expected number of cancellations",
+    y = "Observed number of cancellations"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+data %>%
+  group_by(split) %>%
+  summarise(
+    n = n(),
+    first_arrival = min(arrival_date),
+    last_arrival = max(arrival_date),
+    .groups = "drop"
+  )
+```
+
+
+# Prepare test predictors using the same transformations
+test_export <- test
+
+test_export$requests_group <- factor(
+  pmin(test_export$total_of_special_requests, 3),
+  levels = 0:3,
+  labels = c("0", "1", "2", "3+")
+)
+
+test_export$prev_cancel_group <- factor(
+  pmin(test_export$previous_cancellations, 2),
+  levels = 0:2,
+  labels = c("0", "1", "2+")
+)
+
+# Check for categorical values unseen in training
+for (v in categorical_vars) {
+  unseen <- setdiff(unique(test_export[[v]]),
+                    unique(train[[v]]))
+  if (length(unseen) > 0) {
+    stop(paste("Unseen test category in", v,
+               ":", paste(unseen, collapse = ", ")))
+  }
+}
+
+# Predict probabilities, not 0/1 classes
+p_test14 <- as.numeric(predict(
+  model14,
+  newdata = test_export,
+  type = "response"
+))
+
+stopifnot(
+  length(p_test14) == 17903,
+  all(is.finite(p_test14)),
+  all(p_test14 >= 0 & p_test14 <= 1)
+)
+
+# GitHub uses original zero-based row numbers
+test_preds <- data.frame(
+  id = which(data$split == "test") - 1L,
+  prediction = p_test14
+)
+
+# Run from the repository's top-level directory
+dir.create("MorganL", showWarnings = FALSE)
+
+write.csv(
+  test_preds,
+  "MorganL/test_preds.csv",
+  row.names = FALSE,
+  quote = FALSE
+)
+
+head(test_preds)
+
+
+
+
+TEST TIME!
+```{r}
+# Identify the 17,903 test bookings
+test_rows <- which(data$split == "test")
+test_final <- data[test_rows, , drop = FALSE]
+
+# Apply the same transformations as Model 14
+test_final$requests_group <- factor(
+  pmin(test_final$total_of_special_requests, 3),
+  levels = 0:3,
+  labels = c("0", "1", "2", "3+")
+)
+
+test_final$prev_cancel_group <- factor(
+  pmin(test_final$previous_cancellations, 2),
+  levels = 0:2,
+  labels = c("0", "1", "2+")
+)
+
+# Generate predicted cancellation probabilities
+p_test14 <- as.numeric(
+  predict(model14, newdata = test_final, type = "response")
+)
+
+# Actual outcomes
+y_test <- test_final$is_canceled
+
+stopifnot(
+  length(p_test14) == length(y_test),
+  all(is.finite(p_test14))
+)
+```
+
+```{r}
+# Classification at the conventional 0.5 threshold
+predicted_class <- as.integer(p_test14 >= 0.5)
+
+test_results <- data.frame(
+  Model = "Model 14 - Logistic Regression",
+  Accuracy = mean(predicted_class == y_test),
+  Brier = mean((p_test14 - y_test)^2),
+  ROC_AUC = roc_auc(y_test, p_test14),
+  Average_Precision = average_precision(y_test, p_test14)
+)
+
+print(test_results)
+```
+
+```{r}
+# Recreate the test prediction file
+test_rows <- which(data$split == "test")
+
+test_preds <- data.frame(
+  id = test_rows - 1L,
+  prediction = as.numeric(p_test14)
+)
+
+# Verify format and row order
+stopifnot(
+  nrow(test_preds) == 17903,
+  identical(
+    head(test_preds$id, 5),
+    c(2L, 3L, 9L, 14L, 16L)
+  ),
+  !anyDuplicated(test_preds$id),
+  all(is.finite(test_preds$prediction)),
+  all(test_preds$prediction >= 0 &
+      test_preds$prediction <= 1)
+)
+
+# Save locally
+dir.create("MorganL", showWarnings = FALSE)
+
+write.csv(
+  test_preds,
+  "MorganL/test_preds.csv",
+  row.names = FALSE,
+  quote = FALSE
+)
+
+# Check the saved file
+head(read.csv("MorganL/test_preds.csv"))
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
