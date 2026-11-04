@@ -92,7 +92,7 @@ Most metrics change when only the cancellation rate changes, even if the model d
 | Brier score | 0.138 | 0.149 | 0.156 |
 | Calibration-in-the-large | −0.43 | −0.02 | +0.19 |
 
-Without any change to the model, its precision differs by 0.13 between the two hotels, and its accuracy *falls* as the cancellation rate rises. Scores computed on different hotels, periods or deduplicated data are not comparable, so every model must be scored on the identical test set. That standardisation hides how a model would behave on a different population: a model calibrated at the overall rate over-predicts cancellations at the resort and under-predicts them in the city. The proper scores penalise this, which is right, because a hotel using those probabilities would overbook by the wrong amount. We therefore also report every metric for each hotel, and train on one hotel and test on the other.
+Without any change to the model, its precision differs by 0.13 between the two hotels, and its accuracy *falls* as the cancellation rate rises. Scores computed on different hotels, periods or deduplicated data are not comparable, so every model must be scored on the identical test set. That standardisation hides how a model would behave on a different population: a model calibrated at the overall rate over-predicts cancellations at the resort and under-predicts them in the city. The proper scores penalise this, which is right, because a hotel using those probabilities would overbook by the wrong amount. We therefore also report the metrics for each hotel (`07-Conclusion` and `report/eval/`). We had also planned to train each model on one hotel and test it on the other, but did not run that check.
 
 ### 4.2 One random split: duplicates and booking events
 
@@ -107,13 +107,13 @@ A random split treats test bookings as independent of training bookings, and our
 
 Under a plain random split, a model that cannot generalise at all would reach an AUC of 0.81, because copies of a booking sit on both sides of the split. Keeping identical rows together removes that leak: the memoriser does no better than the base rate. The random forest notebook shows the same leak inside a model. The forest's out-of-bag estimate, which does not keep copies together, gives bookings with identical copies a Brier score of 0.009, against 0.103 on the validation set (`05-Random_forest`, Section 3.2).
 
-A smaller leak remains. A quarter of our test bookings share a booking event with a training or validation booking, and a memoriser that looks up events removes 12% of the benchmark's Brier score. Tree ensembles can pick out individual events from fine-grained features such as lead time and arrival week together, so this may tilt the comparison towards them. Rather than change the agreed split, we measure the tilt: every metric is also reported on the 13,450 test bookings whose booking event does not occur in training or validation. The copies also mean that test rows are not independent, so intervals come from a cluster bootstrap that resamples each block of identical rows as one unit.
+A smaller leak remains. A quarter of our test bookings share a booking event with a training or validation booking, and a memoriser that looks up events removes 12% of the benchmark's Brier score. Tree ensembles can pick out individual events from fine-grained features such as lead time and arrival week together, so this may tilt the comparison towards them. Rather than change the agreed split, we measure the tilt: `07-Conclusion` also reports the Brier score on the 13,450 test bookings whose booking event does not occur in training or validation, and the order of the three models and the gaps between them are almost the same there. The copies also mean that test rows are not independent, so intervals come from a cluster bootstrap that resamples each block of identical rows as one unit.
 
 ### 4.3 A random split cannot test the future
 
 Our split spreads seasons, years and hotels evenly over the three sets (cancellation rates 37.3%, 37.5% and 36.8%), so differences in score reflect the models rather than the time of year. The price is that the test set only asks how well a model predicts bookings from the months and years it was trained on, whereas a hotel would apply it to next season's bookings.
 
-Our data show what this can cost. In `04-XGBoost` (Section 3.2), adding the arrival month and week as features improves the validation log loss under our random split (0.330, against 0.336 without them). An earlier time-based split (training on 2015–16, validating on late 2016) gave the opposite answer (0.451 with them, against 0.412 without): the model had learned the seasonal pattern of particular years. **The standardised evaluation rewards features that a deployed model should drop.** To show how much of each model's skill depends on having seen the same months, each model is also refitted with its chosen settings on arrivals up to 31 December 2016 and scored on the 40,509 arrivals of 2017, of which 38.8% cancelled (against 36.4% before 2017).
+Our data show what this can cost. In `04-XGBoost` (Section 3.2), adding the arrival month and week as features improves the validation log loss under our random split (0.330, against 0.336 without them). An earlier time-based split (training on 2015–16, validating on late 2016) gave the opposite answer (0.451 with them, against 0.412 without): the model had learned the seasonal pattern of particular years. **The standardised evaluation rewards features that a deployed model should drop.** To show how much of each model's skill depends on having seen the same months, we planned to refit each model with its chosen settings on arrivals up to 31 December 2016 and score it on the 40,509 arrivals of 2017, of which 38.8% cancelled (against 36.4% before 2017). We ran this check only for XGBoost, with settings tuned on a time-based split and without the arrival month and week (`ThomasF/ThomasF_test.ipynb`): on 2017 its AUC fell from 0.930 to 0.885, and it predicted 34.6% cancellations against an actual 38.8%. `07-Conclusion` discusses this among its limitations.
 
 ### 4.4 Summary
 
@@ -121,8 +121,8 @@ Our data show what this can cost. In `04-XGBoost` (Section 3.2), adding the arri
 | --- | --- | --- | --- |
 | One primary score (Brier) | A single, proper ranking | A hotel with extreme costs may prefer another model | Murphy diagram over $0.3\le\theta\le0.8$ |
 | One threshold (½) for the decision metrics | Comparable confusion matrices | The hotel's own threshold may differ | Expected cost at $\theta=2/3$; Murphy diagram |
-| One pooled test set | A large sample and tight intervals | Different behaviour in the two hotels | Metrics for each hotel; train on one hotel, test on the other |
-| A random split, identical rows kept together | The same mix of seasons, years and hotels in every set | Predictions of future bookings are never tested; rooms of one booking can straddle the split | Refit on 2015–16 and score 2017; metrics on unseen booking events |
+| One pooled test set | A large sample and tight intervals | Different behaviour in the two hotels | Metrics for each hotel (training on one hotel and testing on the other was planned but not run) |
+| A random split, identical rows kept together | The same mix of seasons, years and hotels in every set | Predictions of future bookings are never tested; rooms of one booking can straddle the split | Metrics on unseen booking events; refit on 2015–16 and score 2017 (XGBoost only) |
 
 ## 5. What "truly best" means
 
@@ -173,7 +173,7 @@ Otherwise we report the models as statistically indistinguishable and say why. I
 3. **Submissions.** Each member saves `<Name>/test_preds.csv` with columns `id,prediction`, where `id` is the booking's 0-based row number in the cleaned file. Tuning, thresholds and recalibration use training and validation data only; the test labels are used once, to score the final models. Random-forest probabilities are recalibrated so that none is exactly 0 or 1.
 4. **Scoring.** `LukeD/metrics/evaluate.py` scores every submission against the shared answer key, `Data/test_truth.csv`, with the metrics of Sections 2 and 3, overall and for each hotel. Its implementations are checked against scikit-learn and SciPy by `LukeD/metrics/test_evaluate.py`.
 5. **Best.** The rule of Section 5.3.
-6. **Generalisation checks.** The metrics on the test bookings whose booking event is unseen; each model refitted on arrivals up to the end of 2016 and scored on 2017; and each model trained on one hotel and tested on the other.
+6. **Generalisation checks.** The metrics on the test bookings whose booking event is unseen; each model refitted on arrivals up to the end of 2016 and scored on 2017; and each model trained on one hotel and tested on the other. Only the first was done for all three models; the second was run for XGBoost alone, and the third not at all (Section 4).
 
 ## 7. Limitations
 

@@ -33,9 +33,9 @@ All report content is in `report/`, to be read in this order:
 4. `report/04-XGBoost.ipynb`: Thomas's gradient boosting model (about 7 minutes to run). Saves `ThomasF/test_preds.csv`.
 5. `report/05-Random_forest.ipynb`: Luke's random forest, tuned and recalibrated on the validation set (about 13 minutes
    to run). Saves `LukeD/test_preds.csv`.
-6. `report/06-Logistic_regression.Rmd`, with its output in `report/06-Logistic_regression.pdf`: Morgan's logistic
+6. `report/06-Logistic_regression.pdf`, the output of `MorganL/06-Logistic_regression.Rmd`: Morgan's logistic
    regression, including model selection, splines, interactions, cross-validation and sensitivity analysis. To run it
-   again (about 2 minutes; it writes a Word document), from the `report/` folder: `Rscript -e 'rmarkdown::render("06-Logistic_regression.Rmd")'`.
+   again (about 2 minutes; it writes a Word document), from the `MorganL/` folder: `Rscript -e 'rmarkdown::render("06-Logistic_regression.Rmd")'`.
    Its test predictions, `MorganL/test_preds.csv`, were saved from Morgan's working file `MorganL/v1.Rmd`; the report's
    final model reproduces them exactly.
 7. `report/07-Conclusion.ipynb`: the comparison of the three models on the test set with the agreed metric, robustness
