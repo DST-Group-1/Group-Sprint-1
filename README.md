@@ -11,12 +11,14 @@ metric, and a way to compare the models.
 * Thomas F: gradient boosting model (XGBoost), EDA and data cleaning
 * Morgan L: logistic regression model 
 
-Equity split: to be agreed by the group and noted here before submission.
+Equity split: equal, a third each (33/33/33).
 
 ## Reading order and requirements
 
 **Preparation.** Python 3.12 or later. `pip install -r requirements.txt` installs the pinned versions of everything the
 notebooks and scripts use (`numpy`, `pandas`, `scipy`, `scikit-learn`, `matplotlib`, `seaborn`, `xgboost` and Jupyter).
+The logistic regression (item 6) is in R: it needs R (tested with 4.6.1) and the packages installed by
+`install.packages(c("rmarkdown", "knitr", "readr", "dplyr", "ggplot2", "tidyr", "scales"))`.
 Run notebooks from the `report/` folder. `Data/hotel_bookings.csv` (raw) and `Data/hotel_bookings_clean.csv` (cleaned,
 with the train/validation/test split) are included, so nothing needs downloading.
 
@@ -31,8 +33,11 @@ All report content is in `report/`, to be read in this order:
 4. `report/04-XGBoost.ipynb`: Thomas's gradient boosting model (about 7 minutes to run). Saves `ThomasF/test_preds.csv`.
 5. `report/05-Random_forest.ipynb`: Luke's random forest, tuned and recalibrated on the validation set (about 13 minutes
    to run). Saves `LukeD/test_preds.csv`.
-6. `report/06-Logistic_regression.Rmd`: Morgan's logistic regression, including model selection, splines, interactions,
-   cross-validation and sensitivity analysis. Uses R and saves `MorganL/test_preds.csv`.
+6. `report/06-Logistic_regression.Rmd`, with its output in `report/06-Logistic_regression.pdf`: Morgan's logistic
+   regression, including model selection, splines, interactions, cross-validation and sensitivity analysis. To run it
+   again (about 2 minutes; it writes a Word document), from the `report/` folder: `Rscript -e 'rmarkdown::render("06-Logistic_regression.Rmd")'`.
+   Its test predictions, `MorganL/test_preds.csv`, were saved from Morgan's working file `MorganL/v1.Rmd`; the report's
+   final model reproduces them exactly.
 
 ## How we test our models
 
