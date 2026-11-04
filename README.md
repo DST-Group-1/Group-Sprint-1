@@ -38,6 +38,9 @@ All report content is in `report/`, to be read in this order:
    again (about 2 minutes; it writes a Word document), from the `report/` folder: `Rscript -e 'rmarkdown::render("06-Logistic_regression.Rmd")'`.
    Its test predictions, `MorganL/test_preds.csv`, were saved from Morgan's working file `MorganL/v1.Rmd`; the report's
    final model reproduces them exactly.
+7. `report/07-Conclusion.ipynb`: the comparison of the three models on the test set with the agreed metric, robustness
+   checks, our conclusions and their limitations (written by Thomas). It reads the scoring output in `report/eval/`,
+   made by the command in the next section.
 
 ## How we test our models
 
@@ -88,6 +91,8 @@ All three models were evaluated on the same 17,903 held-out test bookings, using
 Both tree-based models outperformed logistic regression on the test set. XGBoost achieved the lowest Brier score, although its advantage over Random Forest was small and not statistically significant based on our paired comparison. Logistic regression was less accurate but provided a more interpretable model for examining relationships between booking characteristics and cancellation risk.
 
 One limitation is that our random data split does not necessarily reflect how the models would perform on future bookings. A chronological split would be a useful extension to assess generalisation over time.
+
+The full comparison, robustness checks and limitations are in `report/07-Conclusion.ipynb`.
 
 
 ## Evidence
