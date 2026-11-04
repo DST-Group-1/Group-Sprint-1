@@ -31,8 +31,8 @@ All report content is in `report/`, to be read in this order:
 4. `report/04-XGBoost.ipynb`: Thomas's gradient boosting model (about 7 minutes to run). Saves `ThomasF/test_preds.csv`.
 5. `report/05-Random_forest.ipynb`: Luke's random forest, tuned and recalibrated on the validation set (about 13 minutes
    to run). Saves `LukeD/test_preds.csv`.
-
-The regression notebook is still to be added.
+6. `report/06-Logistic_regression.Rmd`: Morgan's logistic regression, including model selection, splines, interactions,
+   cross-validation and sensitivity analysis. Uses R and saves `MorganL/test_preds.csv`.
 
 ## How we test our models
 
@@ -68,6 +68,22 @@ All in `LukeD/metrics/`:
 
 Code provenance: the scripts in `LukeD/metrics/` and the random forest notebook (`LukeD/05-Random_forest.ipynb`, copied
 to `report/`) were drafted with the help of Claude (Anthropic); the scripts are tested by `test_evaluate.py`.
+
+
+## Results and conclusions
+
+All three models were evaluated on the same 17,903 held-out test bookings, using the Brier score as our primary metric. Lower scores indicate more accurate predicted cancellation probabilities.
+
+| Model | Test Brier score |
+|---|---:|
+| XGBoost (Thomas) | 0.10142 |
+| Random Forest (Luke) | 0.10209 |
+| Logistic Regression (Morgan) | 0.12246 |
+
+Both tree-based models outperformed logistic regression on the test set. XGBoost achieved the lowest Brier score, although its advantage over Random Forest was small and not statistically significant based on our paired comparison. Logistic regression was less accurate but provided a more interpretable model for examining relationships between booking characteristics and cancellation risk.
+
+One limitation is that our random data split does not necessarily reflect how the models would perform on future bookings. A chronological split would be a useful extension to assess generalisation over time.
+
 
 ## Evidence
 
