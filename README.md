@@ -9,7 +9,7 @@ metric, and a way to compare the models.
 
 * Luke D: random forest classifier; research into how to evaluate the models (metrics, tests, simulations, the shared scoring tool)
 * Thomas F: gradient boosting model (XGBoost), EDA and data cleaning
-* Morgan L: regression model (to be confirmed)
+* Morgan L: logistic regression model 
 
 Equity split: to be agreed by the group and noted here before submission.
 
